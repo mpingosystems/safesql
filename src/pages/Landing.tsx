@@ -4,6 +4,7 @@ import { SqlEditor } from '../components/SqlEditor';
 import { ValidationReport } from '../components/ValidationReport';
 import { parseDDL } from '../services/schemaParser';
 import { validateSQL } from '../services/sqlValidator';
+import { startCheckoutForPlan, type Plan } from '../services/stripe';
 
 const DEMO_SQL = `SELECT u.id, u.email, SUM(o.amount) AS total_revenue
 FROM users u
@@ -144,18 +145,7 @@ export function LandingPage() {
       </section>
 
       {/* PRICING */}
-      <section id="pricing" style={section}>
-        <h2 style={h2}>Pricing</h2>
-        <p style={{ ...demoSubhead, marginBottom: 30 }}>
-          DevTools pricing for data teams. Annual billing saves 20%.
-        </p>
-        <div style={pricingGrid}>
-          <PricingCard tier="Free" price="$0" period="forever" features={['50 validations/mo', '5 sandbox runs', 'Basic detectors', 'No AI explanations']} cta="Start free" href="#/editor" />
-          <PricingCard tier="Pro" price="$49" period="per month" highlight features={['Unlimited validations', '100 sandbox runs', 'All 7 detectors', 'AI explanations + fixes', 'Catch Copilot/Cursor bugs']} cta="Upgrade to Pro" href="#/pricing" />
-          <PricingCard tier="Team" price="$199" period="per month · 5 seats" features={['Everything in Pro', 'Shared schema library', 'Team validation history', 'Priority support']} cta="Start team trial" href="#/pricing" />
-          <PricingCard tier="Business" price="$599" period="per month · 20 seats" features={['Everything in Team', 'Custom rules', 'Audit log', 'Slack alerts', 'SLA']} cta="Contact sales" href="#/pricing" />
-        </div>
-      </section>
+      <PricingSection />
 
       {/* FINAL CTA */}
       <section style={{ ...section, textAlign: 'center', paddingTop: 60, paddingBottom: 100 }}>
@@ -194,15 +184,119 @@ function StepCard({ num, title, body }: { num: number; title: string; body: stri
   );
 }
 
-function PricingCard(props: {
+function PricingSection() {
+  const [cadence, setCadence] = useState<'monthly' | 'annual'>('monthly');
+  const [busyPlan, setBusyPlan] = useState<Plan | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleUpgrade = async (plan: Plan) => {
+    setBusyPlan(plan);
+    setError(null);
+    const result = await startCheckoutForPlan(plan, cadence);
+    setBusyPlan(null);
+    if (!result.ok) setError(result.message ?? 'Checkout failed.');
+  };
+
+  const monthly = cadence === 'monthly';
+
+  return (
+    <section id="pricing" style={section}>
+      <h2 style={h2}>Pricing</h2>
+      <p style={{ ...demoSubhead, marginBottom: 18 }}>
+        DevTools pricing for data teams. Annual billing saves 20%.
+      </p>
+
+      <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
+        <div style={{ display: 'inline-flex', background: '#0f0f10', border: '1px solid #27272a', borderRadius: 999, padding: 4 }}>
+          <button
+            type="button"
+            onClick={() => setCadence('monthly')}
+            style={{ ...toggleBtn, background: monthly ? '#7c3aed' : 'transparent', color: monthly ? 'white' : '#a1a1aa' }}
+          >
+            Monthly
+          </button>
+          <button
+            type="button"
+            onClick={() => setCadence('annual')}
+            style={{ ...toggleBtn, background: !monthly ? '#7c3aed' : 'transparent', color: !monthly ? 'white' : '#a1a1aa' }}
+          >
+            Annual <span style={{ fontSize: 10, opacity: 0.85 }}>−20%</span>
+          </button>
+        </div>
+      </div>
+
+      <div style={pricingGrid}>
+        <PricingCard
+          tier="Free"
+          price="$0"
+          period="forever"
+          features={['50 validations/mo', '5 sandbox runs', 'Basic detectors', 'No AI explanations']}
+          cta="Start free"
+          href="#/editor"
+        />
+        <PricingCard
+          tier="Pro"
+          price={monthly ? '$49' : '$470'}
+          period={monthly ? 'per month' : 'per year'}
+          highlight
+          features={['Unlimited validations', '100 sandbox runs', 'All 7 detectors', 'AI explanations + fixes', 'Catch Copilot/Cursor bugs']}
+          cta={busyPlan === 'pro' ? 'Loading…' : 'Upgrade to Pro'}
+          onUpgrade={() => void handleUpgrade('pro')}
+          disabled={busyPlan !== null}
+        />
+        <PricingCard
+          tier="Team"
+          price={monthly ? '$199' : '$1,910'}
+          period={monthly ? 'per month · 5 seats' : 'per year · 5 seats'}
+          features={['Everything in Pro', 'Shared schema library', 'Team validation history', 'Priority support']}
+          cta={busyPlan === 'team' ? 'Loading…' : 'Start team trial'}
+          onUpgrade={() => void handleUpgrade('team')}
+          disabled={busyPlan !== null}
+        />
+        <PricingCard
+          tier="Business"
+          price={monthly ? '$599' : '$5,750'}
+          period={monthly ? 'per month · 20 seats' : 'per year · 20 seats'}
+          features={['Everything in Team', 'Custom rules', 'Audit log', 'Slack alerts', 'SLA']}
+          cta={busyPlan === 'business' ? 'Loading…' : 'Contact sales'}
+          onUpgrade={() => void handleUpgrade('business')}
+          disabled={busyPlan !== null}
+        />
+      </div>
+      {error && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 18,
+            padding: 12,
+            background: '#450a0a',
+            border: '1px solid #7f1d1d',
+            borderRadius: 6,
+            color: '#fecaca',
+            fontSize: 12.5,
+            textAlign: 'center',
+          }}
+        >
+          {error}
+        </div>
+      )}
+    </section>
+  );
+}
+
+interface PricingCardProps {
   tier: string;
   price: string;
   period: string;
   features: string[];
   cta: string;
-  href: string;
+  href?: string;
+  onUpgrade?: () => void;
   highlight?: boolean;
-}) {
+  disabled?: boolean;
+}
+
+function PricingCard(props: PricingCardProps) {
   return (
     <div
       style={{
@@ -243,25 +337,59 @@ function PricingCard(props: {
           </li>
         ))}
       </ul>
-      <a
-        href={props.href}
-        style={{
-          display: 'block',
-          textAlign: 'center',
-          padding: '8px 14px',
-          borderRadius: 5,
-          fontSize: 13,
-          fontWeight: 600,
-          textDecoration: 'none',
-          background: props.highlight ? '#7c3aed' : '#27272a',
-          color: props.highlight ? 'white' : '#e4e4e7',
-        }}
-      >
-        {props.cta}
-      </a>
+      {props.onUpgrade ? (
+        <button
+          type="button"
+          onClick={props.onUpgrade}
+          disabled={props.disabled}
+          style={{
+            width: '100%',
+            padding: '8px 14px',
+            borderRadius: 5,
+            fontSize: 13,
+            fontWeight: 600,
+            border: 'none',
+            cursor: props.disabled ? 'wait' : 'pointer',
+            background: props.highlight ? '#7c3aed' : '#27272a',
+            color: props.highlight ? 'white' : '#e4e4e7',
+            opacity: props.disabled ? 0.6 : 1,
+          }}
+        >
+          {props.cta}
+        </button>
+      ) : (
+        <a
+          href={props.href}
+          style={{
+            display: 'block',
+            textAlign: 'center',
+            padding: '8px 14px',
+            borderRadius: 5,
+            fontSize: 13,
+            fontWeight: 600,
+            textDecoration: 'none',
+            background: props.highlight ? '#7c3aed' : '#27272a',
+            color: props.highlight ? 'white' : '#e4e4e7',
+          }}
+        >
+          {props.cta}
+        </a>
+      )}
     </div>
   );
 }
+
+const toggleBtn: React.CSSProperties = {
+  border: 'none',
+  borderRadius: 999,
+  padding: '6px 14px',
+  fontSize: 12.5,
+  fontWeight: 600,
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 4,
+};
 
 // ── Styles ──────────────────────────────────────────────────────────────────
 

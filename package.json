@@ -12,6 +12,7 @@
   "dependencies": {
     "@clerk/clerk-react": "^5.61.6",
     "@monaco-editor/react": "^4.7.0",
+    "@stripe/stripe-js": "^9.4.0",
     "@supabase/supabase-js": "^2.105.1",
     "lucide-react": "^1.14.0",
     "node-sql-parser": "^5.4.0",

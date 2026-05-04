@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@clerk/clerk-react": "^5.61.6",
+    "@electric-sql/pglite": "^0.4.5",
     "@monaco-editor/react": "^4.7.0",
     "@stripe/stripe-js": "^9.4.0",
     "@supabase/supabase-js": "^2.105.1",

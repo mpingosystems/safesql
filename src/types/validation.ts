@@ -64,6 +64,9 @@ export interface SandboxResult {
   totalRows: number;
   executionMs: number;
   expectedRows?: number;
+  // Set if the database refused to execute the SQL — surfaces real Postgres
+  // semantic errors (e.g., column not in GROUP BY) that the static rules miss.
+  executionError?: string;
   rowCountFlag?: {
     expected: number;
     actual: number;

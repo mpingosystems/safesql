@@ -5,11 +5,11 @@ import { parseDDL } from '../services/schemaParser';
 interface SchemaPanelProps {
   schema: SchemaDefinition | null;
   onSchemaChange: (schema: SchemaDefinition | null) => void;
-  initialDDL?: string;
+  ddl: string;
+  onDdlChange: (next: string) => void;
 }
 
-export function SchemaPanel({ schema, onSchemaChange, initialDDL = '' }: SchemaPanelProps) {
-  const [ddl, setDdl] = useState(initialDDL);
+export function SchemaPanel({ schema, onSchemaChange, ddl, onDdlChange }: SchemaPanelProps) {
   const [error, setError] = useState<string | null>(null);
 
   const handleParse = () => {
@@ -28,7 +28,7 @@ export function SchemaPanel({ schema, onSchemaChange, initialDDL = '' }: SchemaP
   };
 
   const handleClear = () => {
-    setDdl('');
+    onDdlChange('');
     setError(null);
     onSchemaChange(null);
   };
@@ -65,7 +65,7 @@ export function SchemaPanel({ schema, onSchemaChange, initialDDL = '' }: SchemaP
 
       <textarea
         value={ddl}
-        onChange={(e) => setDdl(e.target.value)}
+        onChange={(e) => onDdlChange(e.target.value)}
         placeholder={`-- Paste CREATE TABLE statements\nCREATE TABLE users (\n  id UUID PRIMARY KEY,\n  email TEXT NOT NULL\n);`}
         spellCheck={false}
         style={{

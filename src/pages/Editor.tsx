@@ -3,6 +3,7 @@ import type { SchemaDefinition, ValidationReport as Report } from '../types/vali
 import { SqlEditor } from '../components/SqlEditor';
 import { SchemaPanel } from '../components/SchemaPanel';
 import { ValidationReport } from '../components/ValidationReport';
+import { SandboxPanel } from '../components/SandboxPanel';
 import { validateSQL } from '../services/sqlValidator';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
 
@@ -17,6 +18,7 @@ JOIN order_items oi ON o.id = oi.order_id;
 
 export function EditorPage() {
   const [sql, setSql] = useState(DEFAULT_SQL);
+  const [ddl, setDdl] = useState('');
   const [schema, setSchema] = useState<SchemaDefinition | null>(null);
   const [dialect, setDialect] = useState<Dialect>('postgresql');
   const [aiEnabled, setAiEnabled] = useState(false);
@@ -44,8 +46,13 @@ export function EditorPage() {
       style={{
         display: 'grid',
         gridTemplateColumns: '280px 1fr 360px',
-        gridTemplateRows: 'auto 1fr auto',
-        gridTemplateAreas: '"header header header" "left center right" "footer footer footer"',
+        gridTemplateRows: 'auto minmax(0, 1fr) auto auto',
+        gridTemplateAreas: `
+          "header header header"
+          "left   center right"
+          "left   sandbox right"
+          "footer footer footer"
+        `,
         height: '100vh',
         background: '#09090b',
         color: '#e4e4e7',
@@ -120,7 +127,12 @@ export function EditorPage() {
       </header>
 
       <aside style={{ gridArea: 'left', overflow: 'hidden' }}>
-        <SchemaPanel schema={schema} onSchemaChange={setSchema} />
+        <SchemaPanel
+          schema={schema}
+          onSchemaChange={setSchema}
+          ddl={ddl}
+          onDdlChange={setDdl}
+        />
       </aside>
 
       <main style={{ gridArea: 'center', overflow: 'hidden', borderRight: '1px solid #27272a' }}>
@@ -145,6 +157,18 @@ export function EditorPage() {
       >
         <ValidationReport report={report} />
       </aside>
+
+      <section
+        style={{
+          gridArea: 'sandbox',
+          maxHeight: 360,
+          overflowY: 'auto',
+          borderTop: '1px solid #27272a',
+          borderRight: '1px solid #27272a',
+        }}
+      >
+        <SandboxPanel sql={sql} schema={schema} ddl={ddl} />
+      </section>
 
       <footer
         style={{

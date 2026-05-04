@@ -4,9 +4,12 @@ import { SqlEditor } from '../components/SqlEditor';
 import { SchemaPanel } from '../components/SchemaPanel';
 import { ValidationReport } from '../components/ValidationReport';
 import { SandboxPanel } from '../components/SandboxPanel';
+import { UpgradeBanner } from '../components/UpgradeBanner';
 import { validateSQL } from '../services/sqlValidator';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
+import { persistValidation } from '../services/persistValidation';
 import { AuthControls } from '../components/AuthControls';
+import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
 
 type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake' | 'ansi';
 
@@ -21,12 +24,18 @@ export function EditorPage() {
   const [sql, setSql] = useState(DEFAULT_SQL);
   const [ddl, setDdl] = useState('');
   const [schema, setSchema] = useState<SchemaDefinition | null>(null);
+  const [activeSchemaId, setActiveSchemaId] = useState<string | null>(null);
   const [dialect, setDialect] = useState<Dialect>('postgresql');
   const [aiEnabled, setAiEnabled] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [lastValidatedAt, setLastValidatedAt] = useState<Date | null>(null);
 
+  const { appUser, refresh: refreshAppUser } = useAppUser();
+  const overLimit = isOverValidationLimit(appUser);
+
   const runValidation = useCallback(async () => {
+    if (overLimit) return; // hard block when free-tier limit reached
+
     let next = validateSQL({ sql, schema: schema ?? undefined, dialect });
     setReport(next);
     setLastValidatedAt(new Date());
@@ -34,12 +43,37 @@ export function EditorPage() {
     if (aiEnabled && (next.errors.length > 0 || next.warnings.length > 0)) {
       const enriched = await enrichWithAIExplanations(next, sql, schema ?? undefined);
       setReport({ ...enriched });
+      next = enriched;
     }
-  }, [sql, schema, dialect, aiEnabled]);
+
+    // Fire-and-forget persistence (no await on the validate path).
+    if (appUser?.id) {
+      void persistValidation({
+        appUserId: appUser.id,
+        sql,
+        report: next,
+        schemaId: activeSchemaId ?? undefined,
+        dialect,
+      }).then((ok) => {
+        if (ok) void refreshAppUser(); // pull updated count
+      });
+    }
+  }, [sql, schema, dialect, aiEnabled, appUser, activeSchemaId, refreshAppUser, overLimit]);
 
   const handleValidationFromEditor = (next: Report) => {
     setReport(next);
     setLastValidatedAt(new Date());
+    if (appUser?.id && !overLimit) {
+      void persistValidation({
+        appUserId: appUser.id,
+        sql,
+        report: next,
+        schemaId: activeSchemaId ?? undefined,
+        dialect,
+      }).then((ok) => {
+        if (ok) void refreshAppUser();
+      });
+    }
   };
 
   return (
@@ -68,6 +102,7 @@ export function EditorPage() {
           padding: '10px 16px',
           borderBottom: '1px solid #27272a',
           background: '#0f0f10',
+          gap: 12,
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -84,6 +119,13 @@ export function EditorPage() {
             SafeSQL
           </a>
           <span style={{ color: '#52525b', fontSize: 11 }}>v0.1.0</span>
+          {appUser && (
+            <UsageMeter
+              count={appUser.validations_this_month}
+              limit={FREE_LIMITS.validations}
+              plan={appUser.plan}
+            />
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <label style={{ fontSize: 12, color: '#a1a1aa' }}>
@@ -111,15 +153,18 @@ export function EditorPage() {
           <button
             type="button"
             onClick={() => void runValidation()}
+            disabled={overLimit}
+            title={overLimit ? `Free tier limit (${FREE_LIMITS.validations}/mo) reached` : undefined}
             style={{
-              background: '#7c3aed',
+              background: overLimit ? '#3f3f46' : '#7c3aed',
               color: 'white',
               border: 'none',
               borderRadius: 5,
               padding: '6px 14px',
               fontSize: 12,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: overLimit ? 'not-allowed' : 'pointer',
+              opacity: overLimit ? 0.6 : 1,
             }}
           >
             Validate
@@ -134,10 +179,22 @@ export function EditorPage() {
           onSchemaChange={setSchema}
           ddl={ddl}
           onDdlChange={setDdl}
+          appUserId={appUser?.id ?? null}
+          activeSchemaId={activeSchemaId}
+          onActiveSchemaChange={setActiveSchemaId}
         />
       </aside>
 
       <main style={{ gridArea: 'center', overflow: 'hidden', borderRight: '1px solid #27272a' }}>
+        {overLimit && (
+          <div style={{ padding: 14, borderBottom: '1px solid #27272a', background: '#1e1b4b' }}>
+            <UpgradeBanner
+              plan="pro"
+              cadence="monthly"
+              reason={`You've used ${appUser?.validations_this_month}/${FREE_LIMITS.validations} validations this month.`}
+            />
+          </div>
+        )}
         <SqlEditor
           value={sql}
           onChange={setSql}
@@ -169,7 +226,7 @@ export function EditorPage() {
           borderRight: '1px solid #27272a',
         }}
       >
-        <SandboxPanel sql={sql} schema={schema} ddl={ddl} />
+        <SandboxPanel sql={sql} schema={schema} ddl={ddl} activeSchemaId={activeSchemaId} />
       </section>
 
       <footer
@@ -201,5 +258,33 @@ export function EditorPage() {
         </label>
       </footer>
     </div>
+  );
+}
+
+function UsageMeter({ count, limit, plan }: { count: number; limit: number; plan: string }) {
+  if (plan !== 'free') {
+    return (
+      <span
+        style={{
+          fontSize: 10,
+          padding: '2px 8px',
+          borderRadius: 999,
+          background: '#7c3aed',
+          color: 'white',
+          fontWeight: 600,
+          letterSpacing: 0.5,
+          textTransform: 'uppercase',
+        }}
+      >
+        {plan}
+      </span>
+    );
+  }
+  const ratio = count / limit;
+  const color = ratio >= 1 ? '#ef4444' : ratio >= 0.8 ? '#f59e0b' : '#52525b';
+  return (
+    <span style={{ fontSize: 11, color, fontVariantNumeric: 'tabular-nums' }}>
+      {count}/{limit} validations
+    </span>
   );
 }

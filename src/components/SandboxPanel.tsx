@@ -1,20 +1,27 @@
 import { useState } from 'react';
 import type { SandboxResult, SchemaDefinition } from '../types/validation';
 import { runSandbox } from '../services/sandboxRunner';
+import { persistSandboxRun } from '../services/persistSandboxRun';
+import { FREE_LIMITS, isOverSandboxLimit, useAppUser } from '../hooks/useAppUser';
 
 interface SandboxPanelProps {
   sql: string;
   schema: SchemaDefinition | null;
   ddl: string;
+  activeSchemaId?: string | null;
 }
 
-export function SandboxPanel({ sql, schema, ddl }: SandboxPanelProps) {
+export function SandboxPanel({ sql, schema, ddl, activeSchemaId }: SandboxPanelProps) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<SandboxResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expectedRows, setExpectedRows] = useState<string>('');
 
-  const canRun = !!schema && schema.tables.length > 0 && !!sql.trim() && !!ddl.trim();
+  const { appUser, refresh: refreshAppUser } = useAppUser();
+  const overLimit = isOverSandboxLimit(appUser);
+
+  const canRun =
+    !!schema && schema.tables.length > 0 && !!sql.trim() && !!ddl.trim() && !overLimit;
 
   const handleRun = async () => {
     if (!canRun || !schema) return;
@@ -31,6 +38,16 @@ export function SandboxPanel({ sql, schema, ddl }: SandboxPanelProps) {
         seed: 42,
       });
       setResult(r);
+
+      // Fire-and-forget usage tracking. The trigger bumps the user's counter.
+      if (appUser?.id) {
+        void persistSandboxRun({
+          appUserId: appUser.id,
+          schemaId: activeSchemaId ?? undefined,
+        }).then((ok) => {
+          if (ok) void refreshAppUser();
+        });
+      }
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -47,7 +64,12 @@ export function SandboxPanel({ sql, schema, ddl }: SandboxPanelProps) {
         </span>
       </div>
 
-      {!canRun ? (
+      {overLimit ? (
+        <div style={{ padding: 14, fontSize: 12, color: '#fca5a5' }}>
+          Free-tier sandbox limit reached ({appUser?.sandbox_runs_this_month}/{FREE_LIMITS.sandbox_runs} this month).
+          Upgrade to Pro for 100 runs/mo.
+        </div>
+      ) : !canRun ? (
         <div style={{ padding: 14, fontSize: 12, color: '#71717a' }}>
           Paste DDL into the Schema panel and write SQL above to enable sandbox execution.
         </div>

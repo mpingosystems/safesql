@@ -1,16 +1,33 @@
 import { useState } from 'react';
 import type { SchemaDefinition } from '../types/validation';
 import { parseDDL } from '../services/schemaParser';
+import { useSchemaLibrary, type SavedSchema } from '../hooks/useSchemaLibrary';
 
 interface SchemaPanelProps {
   schema: SchemaDefinition | null;
   onSchemaChange: (schema: SchemaDefinition | null) => void;
   ddl: string;
   onDdlChange: (next: string) => void;
+  appUserId: string | null;
+  activeSchemaId: string | null;
+  onActiveSchemaChange: (id: string | null) => void;
 }
 
-export function SchemaPanel({ schema, onSchemaChange, ddl, onDdlChange }: SchemaPanelProps) {
+export function SchemaPanel({
+  schema,
+  onSchemaChange,
+  ddl,
+  onDdlChange,
+  appUserId,
+  activeSchemaId,
+  onActiveSchemaChange,
+}: SchemaPanelProps) {
   const [error, setError] = useState<string | null>(null);
+  const [savePromptOpen, setSavePromptOpen] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const { schemas, saveSchema, deleteSchema, isLoading } = useSchemaLibrary(appUserId);
+
+  const isAuthed = !!appUserId;
 
   const handleParse = () => {
     setError(null);
@@ -31,6 +48,34 @@ export function SchemaPanel({ schema, onSchemaChange, ddl, onDdlChange }: Schema
     onDdlChange('');
     setError(null);
     onSchemaChange(null);
+    onActiveSchemaChange(null);
+  };
+
+  const handleLoadSaved = (s: SavedSchema) => {
+    onDdlChange(s.ddl);
+    onActiveSchemaChange(s.id);
+    setError(null);
+    const parsed = parseDDL(s.ddl);
+    onSchemaChange(parsed.tables.length > 0 ? parsed : null);
+  };
+
+  const handleSave = async () => {
+    if (!saveName.trim()) return;
+    if (!ddl.trim()) {
+      setError('Nothing to save — paste DDL first.');
+      return;
+    }
+    const saved = await saveSchema({ name: saveName.trim(), ddl });
+    if (saved) {
+      onActiveSchemaChange(saved.id);
+      setSavePromptOpen(false);
+      setSaveName('');
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    const ok = await deleteSchema(id);
+    if (ok && activeSchemaId === id) onActiveSchemaChange(null);
   };
 
   return (
@@ -112,6 +157,120 @@ export function SchemaPanel({ schema, onSchemaChange, ddl, onDdlChange }: Schema
               </li>
             ))}
           </ul>
+        )}
+
+        {isAuthed && (
+          <div style={{ marginTop: 14, borderTop: '1px solid #27272a', paddingTop: 10 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                marginBottom: 6,
+              }}
+            >
+              <span style={{ fontSize: 11, color: '#a1a1aa', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Saved schemas
+              </span>
+              {!savePromptOpen ? (
+                <button
+                  type="button"
+                  onClick={() => setSavePromptOpen(true)}
+                  style={{ ...btnSecondary, padding: '3px 8px' }}
+                >
+                  + Save current
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSavePromptOpen(false);
+                    setSaveName('');
+                  }}
+                  style={{ ...btnSecondary, padding: '3px 8px' }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+
+            {savePromptOpen && (
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                <input
+                  type="text"
+                  placeholder="Name (e.g. ecommerce-prod)"
+                  value={saveName}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void handleSave();
+                  }}
+                  style={{
+                    flex: 1,
+                    background: '#0a0a0a',
+                    color: '#e4e4e7',
+                    border: '1px solid #27272a',
+                    borderRadius: 4,
+                    padding: '4px 8px',
+                    fontSize: 12,
+                  }}
+                  autoFocus
+                />
+                <button type="button" onClick={() => void handleSave()} style={btnPrimary}>
+                  Save
+                </button>
+              </div>
+            )}
+
+            {isLoading ? (
+              <div style={{ fontSize: 11, color: '#52525b' }}>Loading…</div>
+            ) : schemas.length === 0 ? (
+              <div style={{ fontSize: 11, color: '#52525b' }}>
+                Nothing saved yet. Click "+ Save current" to add this schema to your library.
+              </div>
+            ) : (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                {schemas.map((s) => (
+                  <li
+                    key={s.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 8px',
+                      borderRadius: 4,
+                      marginBottom: 3,
+                      background: activeSchemaId === s.id ? '#1e1b4b' : '#18181b',
+                      fontSize: 12,
+                      cursor: 'pointer',
+                    }}
+                    onClick={() => handleLoadSaved(s)}
+                  >
+                    <span style={{ color: '#e4e4e7', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {s.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleDelete(s.id);
+                      }}
+                      title="Delete"
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#71717a',
+                        cursor: 'pointer',
+                        fontSize: 14,
+                        padding: '0 4px',
+                      }}
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         )}
       </div>
     </div>

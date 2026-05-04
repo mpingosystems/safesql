@@ -38,5 +38,5 @@ export function methodNotAllowed(allowed: string[]): Response {
 }
 
 export function siteUrl(env: Env): string {
-  return env.SITE_URL || 'https://safesql.dev';
+  return (env.SITE_URL || 'https://safesql.dev').replace(/\/+$/, '');
 }

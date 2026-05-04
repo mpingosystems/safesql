@@ -5,6 +5,7 @@ import { ValidationReport } from '../components/ValidationReport';
 import { parseDDL } from '../services/schemaParser';
 import { validateSQL } from '../services/sqlValidator';
 import { startCheckoutForPlan, type Plan } from '../services/stripe';
+import { AuthControls } from '../components/AuthControls';
 
 const DEMO_SQL = `SELECT u.id, u.email, SUM(o.amount) AS total_revenue
 FROM users u
@@ -46,6 +47,7 @@ export function LandingPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <a href="#/pricing" style={navLink}>Pricing</a>
+          <AuthControls />
           <a href="#/editor" style={ctaButton}>Open Editor →</a>
         </div>
       </nav>

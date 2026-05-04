@@ -6,6 +6,7 @@ import { ValidationReport } from '../components/ValidationReport';
 import { SandboxPanel } from '../components/SandboxPanel';
 import { validateSQL } from '../services/sqlValidator';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
+import { AuthControls } from '../components/AuthControls';
 
 type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake' | 'ansi';
 
@@ -123,6 +124,7 @@ export function EditorPage() {
           >
             Validate
           </button>
+          <AuthControls />
         </div>
       </header>
 

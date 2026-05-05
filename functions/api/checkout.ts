@@ -1,4 +1,4 @@
-import { error, json, type Env, siteUrl } from '../_shared';
+import { error, json, methodNotAllowed, type Env, siteUrl } from '../_shared';
 
 interface CheckoutBody {
   priceId?: unknown;
@@ -10,7 +10,14 @@ interface CheckoutBody {
   customerEmail?: unknown;
 }
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
+// onRequest catches every method so non-POST requests land on a clean
+// 405 instead of falling through to the SPA's static-asset catch-all.
+export const onRequest: PagesFunction<Env> = async (context) => {
+  if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
+  return onRequestPost(context);
+};
+
+const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promise<Response> => {
   const { request, env } = context;
 
   if (!env.STRIPE_SECRET_KEY) {
@@ -62,12 +69,4 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
   const session = (await stripeRes.json()) as { id: string; url: string };
   return json({ url: session.url, sessionId: session.id });
-};
-
-export const onRequest: PagesFunction<Env> = async ({ request }) => {
-  if (request.method === 'POST') {
-    // Pages Functions auto-routes onRequestPost; this is a fallback for clarity.
-    return new Response('use onRequestPost');
-  }
-  return new Response('Method not allowed', { status: 405, headers: { allow: 'POST' } });
 };

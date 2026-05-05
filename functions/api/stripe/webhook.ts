@@ -1,4 +1,4 @@
-import { error, json, type Env } from '../../_shared';
+import { error, json, methodNotAllowed, type Env } from '../../_shared';
 
 interface WebhookEnv extends Env {
   // Comma-separated price IDs that map to each plan. Set in Pages env.
@@ -16,7 +16,16 @@ interface StripeEvent {
   data: { object: any };
 }
 
-export const onRequestPost: PagesFunction<WebhookEnv> = async ({ request, env }) => {
+// Pages auto-405s most non-POST methods, but for GET/HEAD it falls through
+// to the SPA's static-asset catch-all (returning index.html) when the path
+// is nested. Explicit onRequest catches every method so a browser visit to
+// the webhook URL gets 405 instead of the landing page.
+export const onRequest: PagesFunction<WebhookEnv> = async (context) => {
+  if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
+  return onRequestPost(context);
+};
+
+const onRequestPost = async ({ request, env }: Parameters<PagesFunction<WebhookEnv>>[0]): Promise<Response> => {
   if (!env.STRIPE_WEBHOOK_SECRET) return error(500, 'STRIPE_WEBHOOK_SECRET not configured.');
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     return error(500, 'Supabase env not configured.');

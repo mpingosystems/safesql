@@ -58,6 +58,8 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   issues.push(...detectSelectStar(ast, request.schema));
   issues.push(...detectInnerJoinNullExclusion(ast, request.schema));
   issues.push(...detectAggregationGrainMismatch(ast, request.schema));
+  issues.push(...detectHallucinatedTable(ast, request.schema));
+  issues.push(...detectHallucinatedColumn(ast, request.schema));
 
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity === 'warning');
@@ -387,4 +389,207 @@ function detectAggregationGrainMismatch(ast: any, schema?: SchemaDefinition): Va
     }
   }
   return issues;
+}
+
+// Per-statement: collect CTE names + subquery aliases that should NOT be
+// flagged as hallucinated tables (they're locally defined, not in the schema).
+// node-sql-parser puts CTEs at stmt.with[].name.value and subquery FROM
+// entries at f.expr.ast (with f.as as alias).
+function collectLocalTableNames(stmt: any): Set<string> {
+  const local = new Set<string>();
+  if (!stmt) return local;
+  if (Array.isArray(stmt.with)) {
+    for (const cte of stmt.with) {
+      const name = unwrapCteName(cte);
+      if (name) local.add(name);
+    }
+  }
+  if (Array.isArray(stmt.from)) {
+    for (const f of stmt.from) {
+      if (f?.expr?.ast && typeof f.as === 'string' && f.as) local.add(f.as);
+    }
+  }
+  return local;
+}
+
+function unwrapCteName(cte: any): string | null {
+  if (!cte) return null;
+  const n = cte.name;
+  if (typeof n === 'string') return n;
+  if (n && typeof n === 'object' && typeof n.value === 'string') return n.value;
+  return null;
+}
+
+// ── D8: Hallucinated table (schema required) ────────────────────────────────
+// Walks every table reference in FROM / JOIN / UPDATE / DELETE and flags any
+// name not present in the schema (and not locally defined as a CTE / subquery
+// alias). Critical for AI-SQL validation.
+function detectHallucinatedTable(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  if (!schema) return [];
+  const issues: ValidationIssue[] = [];
+  const known = new Set(schema.tables.map((t) => t.name));
+
+  for (const stmt of asStatements(ast)) {
+    if (!stmt) continue;
+    const local = collectLocalTableNames(stmt);
+    const seen = new Set<string>(); // dedupe per statement
+
+    const flag = (name: string) => {
+      if (!name || seen.has(name) || known.has(name) || local.has(name)) return;
+      seen.add(name);
+      const closest = nearestName(name, [...known]);
+      issues.push({
+        id: 'HALLUCINATED_TABLE',
+        severity: 'error',
+        title: `Table "${name}" not found in schema`,
+        description:
+          `The query references table "${name}", but the parsed schema has no such table. ` +
+          `This will fail at execution. Common cause: AI-generated SQL that hallucinated a plausible-sounding name.`,
+        fix: closest
+          ? `Did you mean "${closest}"? Available tables: ${[...known].join(', ')}.`
+          : `Available tables in schema: ${[...known].join(', ') || '(none)'}.`,
+        metadata: { table: name, suggestion: closest ?? null },
+      });
+    };
+
+    if (Array.isArray(stmt.from)) {
+      for (const f of stmt.from) {
+        if (f && typeof f.table === 'string') flag(f.table);
+      }
+    }
+    if (stmt.type === 'update' || stmt.type === 'delete') {
+      const tables: any[] = Array.isArray(stmt.table) ? stmt.table : stmt.table ? [stmt.table] : [];
+      for (const t of tables) {
+        const name = typeof t === 'string' ? t : t?.table;
+        if (typeof name === 'string') flag(name);
+      }
+    }
+  }
+
+  return issues;
+}
+
+// ── D9: Hallucinated column (schema required, qualified-only v1) ────────────
+// Only flags column refs that have a table qualifier resolvable to a known
+// schema table. Skips bare `col` to avoid false positives from CTEs /
+// subqueries / aliasing — those need a fuller resolver pass.
+function detectHallucinatedColumn(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  if (!schema) return [];
+  const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  for (const t of schema.tables) tableByName.set(t.name, t);
+
+  for (const stmt of asStatements(ast)) {
+    if (!stmt) continue;
+    const local = collectLocalTableNames(stmt);
+    const seen = new Set<string>(); // dedupe per statement by `table.column`
+
+    // Build alias → real-table-name lookup from the FROM list.
+    const aliasMap = new Map<string, string>();
+    if (Array.isArray(stmt.from)) {
+      for (const f of stmt.from) {
+        if (f && typeof f.table === 'string') {
+          aliasMap.set(f.table, f.table);
+          if (typeof f.as === 'string' && f.as) aliasMap.set(f.as, f.table);
+        }
+      }
+    }
+
+    const visit = (colNode: any) => {
+      const tableQual = getColumnTable(colNode);
+      const colName = getColumnName(colNode);
+      if (!tableQual || !colName || colName === '*') return;
+      // Skip locally-defined names (CTE / subquery alias) — out of D9's scope.
+      if (local.has(tableQual)) return;
+      const realTable = aliasMap.get(tableQual) ?? tableQual;
+      if (local.has(realTable)) return;
+      const schemaTable = tableByName.get(realTable);
+      // If the table itself is unknown, that's D8's job, not D9's.
+      if (!schemaTable) return;
+      const exists = schemaTable.columns.some((c) => c.name === colName);
+      if (exists) return;
+      const key = `${realTable}.${colName}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const colNames = schemaTable.columns.map((c) => c.name);
+      const closest = nearestName(colName, colNames);
+      issues.push({
+        id: 'HALLUCINATED_COLUMN',
+        severity: 'error',
+        title: `Column "${colName}" not found on table "${realTable}"`,
+        description:
+          `The query references "${realTable}.${colName}", but that column does not exist in the schema. ` +
+          `This will fail at execution. Common cause: AI-generated SQL hallucinating a plausible column name.`,
+        fix: closest
+          ? `Did you mean "${realTable}.${closest}"? Columns on "${realTable}": ${colNames.join(', ')}.`
+          : `Columns on "${realTable}": ${colNames.join(', ') || '(none)'}.`,
+        metadata: { table: realTable, column: colName, suggestion: closest ?? null },
+      });
+    };
+
+    // Walk the statement's *child* properties — not `stmt` itself, which
+    // would short-circuit on the top-level `select` skip-rule.
+    walkColumnRefs(stmt.columns, visit);
+    walkColumnRefs(stmt.where, visit);
+    walkColumnRefs(stmt.from, visit); // covers JOIN ON conditions
+    walkColumnRefs(stmt.groupby, visit);
+    walkColumnRefs(stmt.orderby, visit);
+    walkColumnRefs(stmt.having, visit);
+  }
+
+  return issues;
+}
+
+// Recurse through any AST sub-tree, calling `visit` on every column_ref.
+// Stops at nested SELECTs (subqueries / CTEs) — they have their own scope
+// and need their own resolution pass, deferred for v2.
+function walkColumnRefs(node: any, visit: (n: any) => void): void {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'column_ref') {
+    visit(node);
+    return;
+  }
+  if (node.type === 'select') return; // do not recurse into nested SELECTs
+  for (const key of Object.keys(node)) {
+    const v = (node as any)[key];
+    if (Array.isArray(v)) {
+      for (const item of v) walkColumnRefs(item, visit);
+    } else if (v && typeof v === 'object') {
+      walkColumnRefs(v, visit);
+    }
+  }
+}
+
+// Cheap "did you mean?" — Levenshtein on small candidate sets is fine here.
+// Returns null if nothing is within distance 3 (avoids absurd suggestions).
+function nearestName(needle: string, hay: string[]): string | null {
+  if (!needle || hay.length === 0) return null;
+  let best: { name: string; d: number } | null = null;
+  for (const candidate of hay) {
+    const d = levenshtein(needle.toLowerCase(), candidate.toLowerCase());
+    if (best === null || d < best.d) best = { name: candidate, d };
+  }
+  if (!best) return null;
+  // Cap suggestion at distance 3 OR ≤ 40% of the longer string, whichever larger.
+  const maxLen = Math.max(needle.length, best.name.length);
+  const threshold = Math.max(3, Math.ceil(maxLen * 0.4));
+  return best.d <= threshold ? best.name : null;
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (a.length === 0) return b.length;
+  if (b.length === 0) return a.length;
+  const prev = new Array<number>(b.length + 1);
+  const curr = new Array<number>(b.length + 1);
+  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost);
+    }
+    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+  }
+  return prev[b.length];
 }

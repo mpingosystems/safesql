@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Sprint working backups (created during in-progress edits, not for commit)
+*.sprint*-baseline
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

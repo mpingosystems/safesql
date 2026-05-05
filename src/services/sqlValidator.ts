@@ -60,6 +60,9 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   issues.push(...detectAggregationGrainMismatch(ast, request.schema));
   issues.push(...detectHallucinatedTable(ast, request.schema));
   issues.push(...detectHallucinatedColumn(ast, request.schema));
+  issues.push(...detectNullEqualityComparison(ast));
+  issues.push(...detectNotInNullable(ast, request.schema));
+  issues.push(...detectAvgOverNullable(ast, request.schema));
 
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity === 'warning');
@@ -592,4 +595,230 @@ function levenshtein(a: string, b: string): number {
     for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
   }
   return prev[b.length];
+}
+
+// node-sql-parser v5 represents NULL literals as { type: 'null', value: null }.
+function isNullLiteral(node: any): boolean {
+  if (!node || typeof node !== 'object') return false;
+  return node.type === 'null';
+}
+
+// Walk WHERE / HAVING / ON looking for nodes matching `predicate`. Stops at
+// nested SELECTs and BOOL/AND/OR shortcuts work transparently because we
+// recurse through left/right.
+function walkPredicates(node: any, visit: (n: any) => void): void {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'select') return;
+  visit(node);
+  for (const key of Object.keys(node)) {
+    const v = (node as any)[key];
+    if (Array.isArray(v)) {
+      for (const item of v) walkPredicates(item, visit);
+    } else if (v && typeof v === 'object') {
+      walkPredicates(v, visit);
+    }
+  }
+}
+
+// ── D10: NULL equality comparison (no schema needed) ────────────────────────
+// Flags `col = NULL`, `col != NULL`, `col <> NULL` anywhere in WHERE / HAVING
+// / JOIN ON. Per ANSI SQL these always evaluate to UNKNOWN, never TRUE — so
+// the predicate silently filters out every row. Pure logic bug.
+function detectNullEqualityComparison(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const seen = new Set<string>(); // dedupe by column name
+
+  for (const stmt of asStatements(ast)) {
+    if (!stmt) continue;
+    const visit = (node: any) => {
+      if (node?.type !== 'binary_expr') return;
+      const op = String(node.operator ?? '').toUpperCase();
+      if (op !== '=' && op !== '!=' && op !== '<>') return;
+      const nullSide = isNullLiteral(node.left)
+        ? 'left'
+        : isNullLiteral(node.right)
+          ? 'right'
+          : null;
+      if (!nullSide) return;
+      const colNode = nullSide === 'left' ? node.right : node.left;
+      const col = getColumnName(colNode) ?? '<expr>';
+      const key = `${op}::${col}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const replacement = op === '=' ? 'IS NULL' : 'IS NOT NULL';
+      issues.push({
+        id: 'NULL_EQUALITY_COMPARISON',
+        severity: 'error',
+        title: `Comparison "${col} ${op} NULL" never matches any row`,
+        description:
+          `Per ANSI SQL, comparing a value to NULL with "${op}" always evaluates to UNKNOWN, never TRUE. ` +
+          `This predicate silently excludes every row, which is almost never the intended behavior.`,
+        fix: `Use ${replacement}: WHERE ${col} ${replacement}`,
+        metadata: { column: col, operator: op },
+      });
+    };
+    walkPredicates(stmt.where, visit);
+    walkPredicates(stmt.having, visit);
+    if (Array.isArray(stmt.from)) {
+      for (const f of stmt.from) walkPredicates(f?.on, visit);
+    }
+  }
+  return issues;
+}
+
+// ── D11: NOT IN with possible NULL values (schema optional) ─────────────────
+// Two cases:
+//   (a) `col NOT IN (1, 2, NULL)` — deterministic from the AST alone.
+//   (b) `col NOT IN (SELECT x FROM t)` where t.x is nullable per schema.
+// Both forms cause `NOT IN` to evaluate to UNKNOWN for every row, returning
+// an empty result set silently.
+function detectNotInNullable(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  if (schema) for (const t of schema.tables) tableByName.set(t.name, t);
+  const seen = new Set<string>();
+
+  for (const stmt of asStatements(ast)) {
+    if (!stmt) continue;
+
+    const visit = (node: any) => {
+      if (node?.type !== 'binary_expr') return;
+      const op = String(node.operator ?? '').toUpperCase();
+      if (op !== 'NOT IN') return;
+
+      const lhsCol = getColumnName(node.left) ?? '<expr>';
+      const rhs = node.right;
+
+      // node-sql-parser shapes:
+      //   literal list      → rhs = { type: 'expr_list', value: [{type:'string',...}, {type:'null',...}] }
+      //   subquery in NOT IN → rhs = { type: 'expr_list', value: [{ ast: { type:'select', ...} }] }
+      // Differentiate by inspecting the first element.
+      if (rhs?.type !== 'expr_list' || !Array.isArray(rhs.value) || rhs.value.length === 0) return;
+      const firstVal = rhs.value[0];
+      const subqueryAst = firstVal && typeof firstVal === 'object' ? firstVal.ast : null;
+
+      // Case (b): subquery whose selected column is nullable per schema.
+      if (subqueryAst && subqueryAst.type === 'select' && schema) {
+        const ss = subqueryAst;
+        const cols = Array.isArray(ss.columns) ? ss.columns : [];
+        if (cols.length !== 1) return;
+        const expr = cols[0]?.expr;
+        if (!expr || expr.type !== 'column_ref') return;
+        const colName = getColumnName(expr);
+        const fromList = Array.isArray(ss.from) ? ss.from : [];
+        if (fromList.length !== 1) return;
+        const srcTable = fromList[0]?.table;
+        if (!colName || typeof srcTable !== 'string') return;
+        const t = tableByName.get(srcTable);
+        if (!t) return;
+        const c = t.columns.find((cc) => cc.name === colName);
+        if (!c?.nullable) return;
+        const key = `sub::${lhsCol}::${srcTable}.${colName}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        issues.push({
+          id: 'NOT_IN_NULLABLE',
+          severity: 'warning',
+          title: `NOT IN subquery may yield NULL — risk of silent empty result`,
+          description:
+            `"${lhsCol} NOT IN (SELECT ${colName} FROM ${srcTable})" reads from a nullable column. ` +
+            `If any returned value is NULL, NOT IN evaluates to UNKNOWN for every outer row and the result is silently empty.`,
+          fix:
+            `Use NOT EXISTS or filter NULLs in the subquery: ` +
+            `WHERE ${lhsCol} NOT IN (SELECT ${colName} FROM ${srcTable} WHERE ${colName} IS NOT NULL)`,
+          metadata: { column: lhsCol, sourceTable: srcTable, sourceColumn: colName },
+        });
+        return;
+      }
+
+      // Case (a): explicit NULL in the literal list.
+      const hasNull = rhs.value.some((v: any) => isNullLiteral(v));
+      if (hasNull) {
+        const key = `list::${lhsCol}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        issues.push({
+          id: 'NOT_IN_NULLABLE',
+          severity: 'warning',
+          title: `NOT IN list contains NULL — query will return zero rows`,
+          description:
+            `"${lhsCol} NOT IN (..., NULL)" evaluates to UNKNOWN for every row because of the NULL literal in the list, ` +
+            `so the result set is silently empty.`,
+          fix: `Remove NULL from the list, or use "${lhsCol} IS NOT NULL AND ${lhsCol} NOT IN (...)" / NOT EXISTS instead.`,
+          metadata: { column: lhsCol, source: 'literal_list' },
+        });
+        return;
+      }
+    };
+
+    walkPredicates(stmt.where, visit);
+    walkPredicates(stmt.having, visit);
+    if (Array.isArray(stmt.from)) {
+      for (const f of stmt.from) walkPredicates(f?.on, visit);
+    }
+  }
+  return issues;
+}
+
+// ── D12: AVG over a nullable column (schema required) ───────────────────────
+// AVG silently excludes NULLs from its denominator. Analysts who expected
+// "average over all rows" get a different number than "sum / count(*)".
+// Suggestion-severity: not always wrong, but worth surfacing.
+function detectAvgOverNullable(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  if (!schema) return [];
+  const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  for (const t of schema.tables) tableByName.set(t.name, t);
+  const seen = new Set<string>();
+
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select') continue;
+
+    const aliasMap = new Map<string, string>();
+    if (Array.isArray(stmt.from)) {
+      for (const f of stmt.from) {
+        if (f && typeof f.table === 'string') {
+          aliasMap.set(f.table, f.table);
+          if (typeof f.as === 'string' && f.as) aliasMap.set(f.as, f.table);
+        }
+      }
+    }
+    // Single-table SELECT: the implicit "this is your column" table.
+    const singleTable =
+      Array.isArray(stmt.from) && stmt.from.length === 1 && typeof stmt.from[0]?.table === 'string'
+        ? (stmt.from[0].table as string)
+        : null;
+
+    for (const col of stmt.columns ?? []) {
+      const expr = col?.expr;
+      if (!expr) continue;
+      const fname = String(expr.name ?? '').toLowerCase();
+      if (expr.type !== 'aggr_func' || fname !== 'avg') continue;
+      const arg = expr.args?.expr;
+      if (!arg || arg.type !== 'column_ref') continue;
+      const colName = getColumnName(arg);
+      const tableQual = getColumnTable(arg);
+      const realTable = tableQual ? aliasMap.get(tableQual) ?? tableQual : singleTable;
+      if (!colName || !realTable) continue;
+      const t = tableByName.get(realTable);
+      const c = t?.columns.find((cc) => cc.name === colName);
+      if (!c?.nullable) continue;
+      const key = `${realTable}.${colName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      issues.push({
+        id: 'AVG_OVER_NULLABLE',
+        severity: 'suggestion',
+        title: `AVG over nullable column "${realTable}.${colName}" silently ignores NULLs`,
+        description:
+          `AVG(${colName}) computes SUM / COUNT(${colName}), which excludes NULL rows from the denominator. ` +
+          `If you intended "average across ALL rows including NULLs", the result will be different from what you expect.`,
+        fix:
+          `If you want NULLs treated as 0: AVG(COALESCE(${colName}, 0)). ` +
+          `If you want the average over only non-NULL rows, the current query is correct — document the assumption.`,
+        metadata: { table: realTable, column: colName },
+      });
+    }
+  }
+  return issues;
 }

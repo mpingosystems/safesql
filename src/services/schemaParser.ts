@@ -78,13 +78,17 @@ export function parseDDL(ddl: string, dialect: ParserDialect = 'postgresql'): Sc
         const fkColumn = fkRef?.definition?.[0] ? unwrapName(fkRef.definition[0]) : undefined;
 
         // Nullable: absence of `nullable` field = nullable. `nullable.value === 'not null'` = NOT NULL.
-        const nullable = def.nullable?.value !== 'not null';
+        // Primary keys are implicitly NOT NULL in every SQL dialect — force false
+        // even when the DDL doesn't spell it out, so detectors that key off
+        // nullability (D6, D12, future D11-subquery resolution) don't false-positive.
+        const isPK = isPKInline || isPKConstraint;
+        const nullable = isPK ? false : def.nullable?.value !== 'not null';
 
         columns.push({
           name: colName,
           type: def.definition?.dataType ?? 'TEXT',
           nullable,
-          isPK: isPKInline || isPKConstraint,
+          isPK,
           isFK,
           fkReferencesTable: fkTable ?? undefined,
           fkReferencesColumn: fkColumn ?? undefined,

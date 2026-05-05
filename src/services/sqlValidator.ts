@@ -237,6 +237,10 @@ function detectJoinMultiplication(ast: any, schema?: SchemaDefinition): Validati
           severity: 'warning',
           title: 'JOIN may multiply rows',
           description: `JOIN with "${joinTable}" may return multiple rows per parent record. Without GROUP BY or aggregation, row counts will be inflated.`,
+          fix:
+            `Pick one: (a) pre-aggregate "${joinTable}" in a CTE before joining, ` +
+            `(b) add GROUP BY on the parent table's primary key, ` +
+            `(c) wrap with SELECT DISTINCT — and verify the join key is unique on "${joinTable}".`,
           metadata: { joinTable },
         });
       }

@@ -29,12 +29,17 @@ export function EditorPage() {
   const [aiEnabled, setAiEnabled] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [lastValidatedAt, setLastValidatedAt] = useState<Date | null>(null);
+  const [clearSignal, setClearSignal] = useState(0);
 
   const { appUser, refresh: refreshAppUser } = useAppUser();
   const overLimit = isOverValidationLimit(appUser);
 
   const runValidation = useCallback(async () => {
     if (overLimit) return; // hard block when free-tier limit reached
+
+    // Clear stale results BEFORE running the new pass so the panel doesn't
+    // briefly show last validation's errors against this validation's SQL.
+    setReport(null);
 
     let next = validateSQL({ sql, schema: schema ?? undefined, dialect });
     setReport(next);
@@ -75,6 +80,13 @@ export function EditorPage() {
       });
     }
   };
+
+  const handleClear = useCallback(() => {
+    setSql('');
+    setReport(null);
+    setLastValidatedAt(null);
+    setClearSignal((n) => n + 1);
+  }, []);
 
   return (
     <div
@@ -128,6 +140,85 @@ export function EditorPage() {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <AuthControls />
+        </div>
+      </header>
+
+      <aside style={{ gridArea: 'left', overflow: 'hidden' }}>
+        <SchemaPanel
+          schema={schema}
+          onSchemaChange={setSchema}
+          ddl={ddl}
+          onDdlChange={setDdl}
+          appUserId={appUser?.id ?? null}
+          activeSchemaId={activeSchemaId}
+          onActiveSchemaChange={setActiveSchemaId}
+        />
+      </aside>
+
+      <main
+        style={{
+          gridArea: 'center',
+          overflow: 'hidden',
+          borderRight: '1px solid #27272a',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {overLimit && (
+          <div style={{ padding: 14, borderBottom: '1px solid #27272a', background: '#1e1b4b' }}>
+            <UpgradeBanner
+              plan="pro"
+              cadence="monthly"
+              reason={`You've used ${appUser?.validations_this_month}/${FREE_LIMITS.validations} validations this month.`}
+            />
+          </div>
+        )}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            padding: '8px 12px',
+            borderBottom: '1px solid #27272a',
+            background: '#0f0f10',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => void runValidation()}
+            disabled={overLimit}
+            title={overLimit ? `Free tier limit (${FREE_LIMITS.validations}/mo) reached` : undefined}
+            style={{
+              background: overLimit ? '#3f3f46' : '#7c3aed',
+              color: 'white',
+              border: 'none',
+              borderRadius: 5,
+              padding: '6px 14px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: overLimit ? 'not-allowed' : 'pointer',
+              opacity: overLimit ? 0.6 : 1,
+            }}
+          >
+            Validate
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            style={{
+              background: 'transparent',
+              color: '#a1a1aa',
+              border: '1px solid #27272a',
+              borderRadius: 5,
+              padding: '6px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            Clear
+          </button>
           <label style={{ fontSize: 12, color: '#a1a1aa' }}>
             Dialect:{' '}
             <select
@@ -149,60 +240,22 @@ export function EditorPage() {
               <option value="ansi">ANSI</option>
             </select>
           </label>
-          <span style={{ color: '#52525b', fontSize: 11 }}>Ctrl+S to validate</span>
-          <button
-            type="button"
-            onClick={() => void runValidation()}
-            disabled={overLimit}
-            title={overLimit ? `Free tier limit (${FREE_LIMITS.validations}/mo) reached` : undefined}
-            style={{
-              background: overLimit ? '#3f3f46' : '#7c3aed',
-              color: 'white',
-              border: 'none',
-              borderRadius: 5,
-              padding: '6px 14px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: overLimit ? 'not-allowed' : 'pointer',
-              opacity: overLimit ? 0.6 : 1,
-            }}
-          >
-            Validate
-          </button>
-          <AuthControls />
+          <span style={{ color: '#52525b', fontSize: 11, marginLeft: 'auto' }}>
+            Ctrl+S to validate
+          </span>
         </div>
-      </header>
-
-      <aside style={{ gridArea: 'left', overflow: 'hidden' }}>
-        <SchemaPanel
-          schema={schema}
-          onSchemaChange={setSchema}
-          ddl={ddl}
-          onDdlChange={setDdl}
-          appUserId={appUser?.id ?? null}
-          activeSchemaId={activeSchemaId}
-          onActiveSchemaChange={setActiveSchemaId}
-        />
-      </aside>
-
-      <main style={{ gridArea: 'center', overflow: 'hidden', borderRight: '1px solid #27272a' }}>
-        {overLimit && (
-          <div style={{ padding: 14, borderBottom: '1px solid #27272a', background: '#1e1b4b' }}>
-            <UpgradeBanner
-              plan="pro"
-              cadence="monthly"
-              reason={`You've used ${appUser?.validations_this_month}/${FREE_LIMITS.validations} validations this month.`}
-            />
-          </div>
-        )}
-        <SqlEditor
-          value={sql}
-          onChange={setSql}
-          onValidate={handleValidationFromEditor}
-          schema={schema ?? undefined}
-          dialect={dialect}
-          aiEnabled={aiEnabled}
-        />
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <SqlEditor
+            value={sql}
+            onChange={setSql}
+            onValidate={handleValidationFromEditor}
+            onValidateStart={() => setReport(null)}
+            schema={schema ?? undefined}
+            dialect={dialect}
+            aiEnabled={aiEnabled}
+            clearSignal={clearSignal}
+          />
+        </div>
       </main>
 
       <aside

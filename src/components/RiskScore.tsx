@@ -1,22 +1,25 @@
 interface RiskScoreProps {
   score: number;
+  neutral?: boolean;
 }
 
-function colorFor(score: number): string {
+function colorFor(score: number, neutral?: boolean): string {
+  if (neutral) return '#52525b';
   if (score >= 85) return '#22c55e';
   if (score >= 41) return '#eab308';
   return '#ef4444';
 }
 
-function labelFor(score: number): string {
+function labelFor(score: number, neutral?: boolean): string {
+  if (neutral) return 'Idle';
   if (score >= 85) return 'Safe';
   if (score >= 41) return 'Review';
   return 'Risky';
 }
 
-export function RiskScore({ score }: RiskScoreProps) {
-  const color = colorFor(score);
-  const label = labelFor(score);
+export function RiskScore({ score, neutral }: RiskScoreProps) {
+  const color = colorFor(score, neutral);
+  const label = labelFor(score, neutral);
 
   return (
     <div

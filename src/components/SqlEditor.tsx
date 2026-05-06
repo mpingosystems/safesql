@@ -11,10 +11,12 @@ export interface SqlEditorProps {
   value: string;
   onChange: (next: string) => void;
   onValidate: (report: ValidationReport) => void;
+  onValidateStart?: () => void;
   schema?: SchemaDefinition;
   dialect?: Dialect;
   aiEnabled?: boolean;
   height?: string | number;
+  clearSignal?: number;
 }
 
 const SEVERITY_TO_MARKER: Record<ValidationIssue['severity'], number> = {
@@ -28,19 +30,31 @@ export function SqlEditor(props: SqlEditorProps) {
     value,
     onChange,
     onValidate,
+    onValidateStart,
     schema,
     dialect = 'postgresql',
     aiEnabled = false,
     height = '100%',
+    clearSignal,
   } = props;
 
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
 
+  const clearMarkers = () => {
+    const ed = editorRef.current;
+    const monaco = monacoRef.current;
+    const model = ed?.getModel();
+    if (monaco && model) monaco.editor.setModelMarkers(model, 'safesql', []);
+  };
+
   const runValidation = async () => {
     const ed = editorRef.current;
     if (!ed) return;
     const sql = ed.getValue();
+
+    onValidateStart?.();
+    clearMarkers();
 
     let report = validateSQL({ sql, schema, dialect });
     onValidate(report);
@@ -85,12 +99,14 @@ export function SqlEditor(props: SqlEditorProps) {
 
   useEffect(() => {
     return () => {
-      const ed = editorRef.current;
-      const monaco = monacoRef.current;
-      const model = ed?.getModel();
-      if (monaco && model) monaco.editor.setModelMarkers(model, 'safesql', []);
+      clearMarkers();
     };
   }, []);
+
+  useEffect(() => {
+    if (clearSignal === undefined) return;
+    clearMarkers();
+  }, [clearSignal]);
 
   return (
     <Editor

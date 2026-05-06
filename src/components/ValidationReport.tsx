@@ -16,8 +16,20 @@ export function ValidationReport({ report, onExecute, onFixIssues }: ValidationR
 
   if (!report) {
     return (
-      <div style={{ padding: 16, color: '#71717a', fontSize: 13 }}>
-        Press <kbd style={kbdStyle}>Ctrl</kbd>+<kbd style={kbdStyle}>S</kbd> or click <b>Validate</b> to check this query.
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+        <RiskScore score={100} neutral />
+        <div
+          style={{
+            padding: 16,
+            color: '#71717a',
+            fontSize: 13,
+            textAlign: 'center',
+            borderTop: '1px solid #27272a',
+          }}
+        >
+          No errors. Press <kbd style={kbdStyle}>Ctrl</kbd>+<kbd style={kbdStyle}>S</kbd> or click{' '}
+          <b>Validate</b> to check this query.
+        </div>
       </div>
     );
   }

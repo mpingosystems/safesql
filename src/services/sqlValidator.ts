@@ -472,10 +472,12 @@ function detectHallucinatedTable(ast: any, schema?: SchemaDefinition): Validatio
   return issues;
 }
 
-// ── D9: Hallucinated column (schema required, qualified-only v1) ────────────
-// Only flags column refs that have a table qualifier resolvable to a known
-// schema table. Skips bare `col` to avoid false positives from CTEs /
-// subqueries / aliasing — those need a fuller resolver pass.
+// ── D9: Hallucinated column (schema required) ──────────────────────────────
+// Resolves two cases:
+//   1. Qualified refs (`alias.col` / `table.col`) — fully supported.
+//   2. Bare unqualified refs — only when SELECT has exactly ONE schema table
+//      in FROM and no CTEs declared. Multi-table joins, CTE scope, and
+//      subqueries-in-FROM stay deferred to v2 (those need a real resolver).
 function detectHallucinatedColumn(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
   if (!schema) return [];
   const issues: ValidationIssue[] = [];
@@ -498,10 +500,60 @@ function detectHallucinatedColumn(ast: any, schema?: SchemaDefinition): Validati
       }
     }
 
+    // Single-table FROM resolution context (else null = bare cols deferred).
+    let singleFromTable: SchemaDefinition['tables'][number] | null = null;
+    if (
+      stmt.type === 'select' &&
+      Array.isArray(stmt.from) &&
+      stmt.from.length === 1 &&
+      !Array.isArray(stmt.with)
+    ) {
+      const f = stmt.from[0];
+      // Plain table ref only — exclude FROM subqueries (f.expr.ast).
+      if (f && typeof f.table === 'string' && !f.expr) {
+        singleFromTable = tableByName.get(f.table) ?? null;
+      }
+    }
+
+    // SELECT-clause output aliases — ORDER BY can legally reference these,
+    // so don't flag them as hallucinated bare columns.
+    const selectAliases = new Set<string>();
+    if (Array.isArray(stmt.columns)) {
+      for (const c of stmt.columns) {
+        if (typeof c?.as === 'string' && c.as) selectAliases.add(c.as);
+      }
+    }
+
     const visit = (colNode: any) => {
       const tableQual = getColumnTable(colNode);
       const colName = getColumnName(colNode);
-      if (!tableQual || !colName || colName === '*') return;
+      if (!colName || colName === '*') return;
+
+      if (!tableQual) {
+        // Bare column — only resolve when single-table FROM context is set.
+        if (!singleFromTable) return;
+        if (selectAliases.has(colName)) return;
+        if (singleFromTable.columns.some((c) => c.name === colName)) return;
+        const key = `${singleFromTable.name}.${colName}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const colNames = singleFromTable.columns.map((c) => c.name);
+        const closest = nearestName(colName, colNames);
+        issues.push({
+          id: 'HALLUCINATED_COLUMN',
+          severity: 'error',
+          title: `Column "${colName}" not found on table "${singleFromTable.name}"`,
+          description:
+            `The query references "${colName}", but that column does not exist on "${singleFromTable.name}". ` +
+            `This will fail at execution. Common cause: AI-generated SQL hallucinating a plausible column name.`,
+          fix: closest
+            ? `Did you mean "${closest}"? Columns on "${singleFromTable.name}": ${colNames.join(', ')}.`
+            : `Columns on "${singleFromTable.name}": ${colNames.join(', ') || '(none)'}.`,
+          metadata: { table: singleFromTable.name, column: colName, suggestion: closest ?? null },
+        });
+        return;
+      }
+
       // Skip locally-defined names (CTE / subquery alias) — out of D9's scope.
       if (local.has(tableQual)) return;
       const realTable = aliasMap.get(tableQual) ?? tableQual;

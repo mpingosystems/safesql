@@ -111,10 +111,34 @@ describe('D9: HALLUCINATED_COLUMN', () => {
     ).toBeDefined();
   });
 
-  it('does NOT flag bare unqualified columns (v1 deferred)', () => {
-    // 'lifetime_value' isn't on users — but v1 only resolves qualified refs.
-    // This test pins that intentional limit so we notice if behavior changes.
+  it('flags a bare unqualified column when there is exactly one FROM table', () => {
     const r = v('SELECT lifetime_value FROM users');
+    const issue = r.errors.find((e) => e.id === 'HALLUCINATED_COLUMN');
+    expect(issue).toBeDefined();
+    expect(issue!.metadata?.table).toBe('users');
+    expect(issue!.metadata?.column).toBe('lifetime_value');
+  });
+
+  it('does NOT flag bare columns with multi-table FROM (joins still deferred)', () => {
+    // With JOINs the resolver can't unambiguously pick a table; v2 work.
+    const r = v(
+      'SELECT lifetime_value FROM users u JOIN orders o ON o.user_id = u.id',
+    );
+    expect(r.errors.find((e) => e.id === 'HALLUCINATED_COLUMN')).toBeUndefined();
+  });
+
+  it('does NOT flag bare columns when a CTE is declared (CTE scope deferred)', () => {
+    const r = v('WITH foo AS (SELECT 1 AS x) SELECT lifetime_value FROM users');
+    expect(r.errors.find((e) => e.id === 'HALLUCINATED_COLUMN')).toBeUndefined();
+  });
+
+  it('does NOT false-positive when ORDER BY references a SELECT alias', () => {
+    const r = v('SELECT id AS user_id FROM users ORDER BY user_id');
+    expect(r.errors.find((e) => e.id === 'HALLUCINATED_COLUMN')).toBeUndefined();
+  });
+
+  it('passes a bare unqualified column that exists on the single FROM table', () => {
+    const r = v('SELECT email FROM users');
     expect(r.errors.find((e) => e.id === 'HALLUCINATED_COLUMN')).toBeUndefined();
   });
 

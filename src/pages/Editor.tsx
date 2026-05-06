@@ -219,7 +219,7 @@ export function EditorPage() {
           >
             Clear
           </button>
-          <label style={{ fontSize: 12, color: '#a1a1aa' }}>
+          <label style={{ fontSize: 12, color: '#a1a1aa', marginLeft: 16 }}>
             Dialect:{' '}
             <select
               value={dialect}

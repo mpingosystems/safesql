@@ -191,6 +191,12 @@ function generateValue(_table: SchemaTable, col: any, rng: Rng): unknown {
     // Parent not yet seeded — fall through to type-based generation
   }
 
+  // CHECK (col IN (...)) constraints take priority over type-based and sample
+  // generation — otherwise sandbox INSERTs hit "violates check constraint".
+  if (Array.isArray(col.checkAllowedValues) && col.checkAllowedValues.length > 0) {
+    return rng.pick(col.checkAllowedValues);
+  }
+
   const type = String(col.type ?? '').toUpperCase();
 
   if (type === 'UUID') return rng.uuid();

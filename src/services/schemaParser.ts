@@ -95,6 +95,12 @@ export function parseDDL(ddl: string, dialect: ParserDialect = 'postgresql'): Sc
         });
       }
 
+      const checkEnums = extractCheckEnums(stmt);
+      for (const col of columns) {
+        const allowed = checkEnums.get(col.name);
+        if (allowed && allowed.length > 0) col.checkAllowedValues = allowed;
+      }
+
       tables.push({ name: tableName, columns });
     } catch {
       // Skip unparseable statements
@@ -102,4 +108,29 @@ export function parseDDL(ddl: string, dialect: ParserDialect = 'postgresql'): Sc
   }
 
   return { tables };
+}
+
+// Extract `CHECK (col IN ('a','b','c'))` constraints from raw DDL text.
+// node-sql-parser surfaces CHECK clauses inconsistently across dialects, so a
+// targeted regex is more reliable for this specific (and very common) pattern.
+// Returns a map of column-name → allowed string values.
+export function extractCheckEnums(ddl: string): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  // Matches:  CHECK ( <ident> IN ( 'a' , 'b' , ... ) )
+  // - column ident may be bare or double-quoted
+  // - allows arbitrary whitespace
+  // - only quoted-string enum values (numeric IN-lists are skipped intentionally —
+  //   downstream generation only needs string enums for the TEXT-column case)
+  const re =
+    /CHECK\s*\(\s*"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s+IN\s*\(\s*((?:'(?:[^']|'')*'\s*,?\s*)+)\)\s*\)/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(ddl)) !== null) {
+    const colName = m[1];
+    const valuesPart = m[2];
+    const values = [...valuesPart.matchAll(/'((?:[^']|'')*)'/g)].map((mm) =>
+      mm[1].replace(/''/g, "'"),
+    );
+    if (values.length > 0) out.set(colName, values);
+  }
+  return out;
 }

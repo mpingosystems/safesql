@@ -62,6 +62,9 @@ export interface SchemaColumn {
   isFK: boolean;
   fkReferencesTable?: string;
   fkReferencesColumn?: string;
+  // Allowed-value list extracted from `CHECK (col IN ('a','b','c'))`.
+  // Used by the sandbox to generate CHECK-constraint-respecting synthetic data.
+  checkAllowedValues?: string[];
 }
 
 export interface SandboxResult {

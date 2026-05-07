@@ -69,7 +69,7 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   const suggestions = issues.filter((i) => i.severity === 'suggestion');
 
   return {
-    riskScore: calculateRiskScore(errors.length, warnings.length),
+    riskScore: calculateRiskScore(errors.length, warnings.length, suggestions.length),
     executionSafe: errors.length === 0,
     errors,
     warnings,
@@ -78,9 +78,16 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   };
 }
 
-function calculateRiskScore(errorCount: number, warningCount: number): number {
+function calculateRiskScore(
+  errorCount: number,
+  warningCount: number,
+  suggestionCount: number,
+): number {
   if (errorCount > 0) return Math.max(0, 40 - errorCount * 15);
   if (warningCount > 0) return Math.max(41, 85 - warningCount * 10);
+  // Suggestions stay in the Safe band but visibly nudge the score so users
+  // notice them rather than seeing an unchanged 100.
+  if (suggestionCount > 0) return Math.max(85, 100 - suggestionCount * 5);
   return 100;
 }
 

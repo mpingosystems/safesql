@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { SchemaDefinition, ValidationReport as Report } from '../types/validation';
 import { SqlEditor } from '../components/SqlEditor';
 import { SchemaPanel } from '../components/SchemaPanel';
@@ -11,7 +11,23 @@ import { persistValidation } from '../services/persistValidation';
 import { AuthControls } from '../components/AuthControls';
 import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
 
-type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake' | 'ansi';
+type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
+
+const SUPPORTED_DIALECTS: readonly Dialect[] = ['postgresql', 'mysql', 'bigquery', 'snowflake'];
+const DIALECT_STORAGE_KEY = 'safesql.dialect';
+
+function loadInitialDialect(): Dialect {
+  if (typeof window === 'undefined') return 'postgresql';
+  try {
+    const stored = window.sessionStorage.getItem(DIALECT_STORAGE_KEY);
+    if (stored && (SUPPORTED_DIALECTS as readonly string[]).includes(stored)) {
+      return stored as Dialect;
+    }
+  } catch {
+    // sessionStorage may be unavailable (private mode quotas, SSR-style stubs)
+  }
+  return 'postgresql';
+}
 
 const DEFAULT_SQL = `-- Paste your SQL here, then press Ctrl+S to validate
 SELECT u.id, u.email, SUM(o.amount) AS total
@@ -25,7 +41,15 @@ export function EditorPage() {
   const [ddl, setDdl] = useState('');
   const [schema, setSchema] = useState<SchemaDefinition | null>(null);
   const [activeSchemaId, setActiveSchemaId] = useState<string | null>(null);
-  const [dialect, setDialect] = useState<Dialect>('postgresql');
+  const [dialect, setDialect] = useState<Dialect>(loadInitialDialect);
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(DIALECT_STORAGE_KEY, dialect);
+    } catch {
+      // ignore storage failures
+    }
+  }, [dialect]);
   const [aiEnabled, setAiEnabled] = useState(false);
   const [report, setReport] = useState<Report | null>(null);
   const [lastValidatedAt, setLastValidatedAt] = useState<Date | null>(null);
@@ -237,7 +261,6 @@ export function EditorPage() {
               <option value="mysql">MySQL</option>
               <option value="bigquery">BigQuery</option>
               <option value="snowflake">Snowflake</option>
-              <option value="ansi">ANSI</option>
             </select>
           </label>
           <span style={{ color: '#52525b', fontSize: 11, marginLeft: 'auto' }}>

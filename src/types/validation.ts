@@ -1,7 +1,7 @@
 export interface ValidationRequest {
   sql: string;
   schema?: SchemaDefinition;
-  dialect: 'postgresql' | 'mysql' | 'bigquery' | 'snowflake' | 'ansi';
+  dialect: 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
   expectedRowCount?: number;
 }
 

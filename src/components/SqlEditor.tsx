@@ -5,7 +5,7 @@ import type { SchemaDefinition, ValidationIssue, ValidationReport } from '../typ
 import { validateSQL } from '../services/sqlValidator';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
 
-type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake' | 'ansi';
+type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
 
 export interface SqlEditorProps {
   value: string;

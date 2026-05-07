@@ -3,7 +3,7 @@ import type { SchemaColumn, SchemaDefinition, SchemaTable } from '../types/valid
 
 const parser = new Parser();
 
-type ParserDialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake' | 'ansi';
+type ParserDialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
 
 // node-sql-parser v5 wraps identifiers as { expr: { type: 'default', value: 'name' } }.
 // This helper digs through those wrappers and returns the bare string.

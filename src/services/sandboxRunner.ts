@@ -6,7 +6,24 @@ type PGliteCtor = typeof import('@electric-sql/pglite').PGlite;
 let pgliteCtorPromise: Promise<PGliteCtor> | null = null;
 function loadPGlite(): Promise<PGliteCtor> {
   if (!pgliteCtorPromise) {
-    pgliteCtorPromise = import('@electric-sql/pglite').then((m) => m.PGlite);
+    pgliteCtorPromise = import('@electric-sql/pglite')
+      .then((m) => m.PGlite)
+      .catch((err: unknown) => {
+        // A failed dynamic import memoizes a REJECTED promise, which would
+        // poison every later retry. Clear it so a reload (or a retry after a
+        // new deploy lands) can succeed.
+        pgliteCtorPromise = null;
+        const msg = String((err as Error)?.message ?? err);
+        // Classic "stale index.html after redeploy" symptom: the cached HTML
+        // references a chunk hash that no longer exists on the server.
+        if (/dynamically imported module|Failed to fetch|error loading|importing a module/i.test(msg)) {
+          throw new Error(
+            'Could not load the sandbox engine. A new version of SafeSQL was likely just deployed — ' +
+              'reload the page (Ctrl/Cmd+Shift+R) and run again.',
+          );
+        }
+        throw err as Error;
+      });
   }
   return pgliteCtorPromise;
 }

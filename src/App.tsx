@@ -13,11 +13,12 @@ import { BlogPage } from './pages/Blog';
 import { TeamSetupPage } from './pages/TeamSetup';
 import { TeamMembersPage } from './pages/TeamMembers';
 import { JoinTeamPage } from './pages/JoinTeam';
+import { QueryLibraryPage } from './pages/QueryLibrary';
 
 type Route =
   | 'landing' | 'editor' | 'pricing' | 'share' | 'analytics' | 'settings'
   | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules' | 'blog'
-  | 'team-setup' | 'team-members' | 'team-join';
+  | 'team-setup' | 'team-members' | 'team-join' | 'library';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -32,6 +33,7 @@ function routeFromLocation(): Route {
   if (h.startsWith('/team/members')) return 'team-members';
   if (h.startsWith('/team/join')) return 'team-join';
   if (h.startsWith('/team/setup')) return 'team-setup';
+  if (h.startsWith('/library')) return 'library';
   if (h.startsWith('/compliance')) return 'compliance';
   if (h.startsWith('/blog')) return 'blog';
   if (h.startsWith('/analytics')) return 'analytics';
@@ -81,6 +83,8 @@ function App() {
       return <TeamMembersPage />;
     case 'team-join':
       return <JoinTeamPage />;
+    case 'library':
+      return <QueryLibraryPage />;
     case 'blog':
       return <BlogPage />;
     default:

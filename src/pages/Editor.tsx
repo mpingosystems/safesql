@@ -10,6 +10,7 @@ import { SchemaPanel } from '../components/SchemaPanel';
 import { ValidationReport } from '../components/ValidationReport';
 import { SandboxPanel } from '../components/SandboxPanel';
 import { UpgradeBanner } from '../components/UpgradeBanner';
+import { SaveQueryButton } from '../components/SaveQueryButton';
 import { validateSQL } from '../services/sqlValidator';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
 import { persistValidation } from '../services/persistValidation';
@@ -65,9 +66,24 @@ function loadInitialSql(): string {
   return DEFAULT_SQL;
 }
 
+// Query Library "open in editor" stashes the schema DDL here alongside the SQL.
+function loadInitialDdl(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    const preload = window.sessionStorage.getItem('safesql.preloadDdl');
+    if (preload) {
+      window.sessionStorage.removeItem('safesql.preloadDdl');
+      return preload;
+    }
+  } catch {
+    // sessionStorage may be unavailable
+  }
+  return '';
+}
+
 export function EditorPage() {
   const [sql, setSql] = useState(loadInitialSql);
-  const [ddl, setDdl] = useState('');
+  const [ddl, setDdl] = useState(loadInitialDdl);
   const [schema, setSchema] = useState<SchemaDefinition | null>(null);
   const [activeSchemaId, setActiveSchemaId] = useState<string | null>(null);
   const [dialect, setDialect] = useState<Dialect>(loadInitialDialect);
@@ -219,6 +235,16 @@ export function EditorPage() {
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {report && appUser?.id && (
+            <SaveQueryButton
+              userId={appUser.id}
+              sql={sql}
+              ddl={ddl || undefined}
+              dialect={dialect}
+              riskScore={report.riskScore}
+            />
+          )}
+          <a href="#/library" style={navLink}>Library</a>
           <a href="#/analytics" style={navLink}>Analytics</a>
           <a href="#/blog" style={navLink}>Blog</a>
           <a href="#/pricing" style={navLink}>Pricing</a>

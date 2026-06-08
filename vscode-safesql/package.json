@@ -1,0 +1,49 @@
+{
+  "name": "vscode-safesql",
+  "displayName": "SafeSQL",
+  "description": "Pre-execution SQL validation — catch logic errors before they run",
+  "version": "0.1.0",
+  "publisher": "mpingo-systems",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters"],
+  "activationEvents": ["onLanguage:sql"],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "compile": "tsc -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.85.0",
+    "@types/node": "^24.12.2",
+    "typescript": "~6.0.2",
+    "@vscode/vsce": "^3.0.0"
+  },
+  "contributes": {
+    "commands": [
+      { "command": "safesql.validate", "title": "SafeSQL: Validate current file" }
+    ],
+    "configuration": {
+      "title": "SafeSQL",
+      "properties": {
+        "safesql.apiKey": {
+          "type": "string",
+          "description": "Your SafeSQL API key (get one at safesqlpro.dev/settings)"
+        },
+        "safesql.dialect": {
+          "type": "string",
+          "enum": ["postgresql", "mysql", "bigquery", "snowflake"],
+          "default": "postgresql"
+        },
+        "safesql.schemaFile": {
+          "type": "string",
+          "description": "Path to DDL schema file (relative to workspace root)"
+        },
+        "safesql.validateOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Validate SQL files automatically on save"
+        }
+      }
+    }
+  }
+}

@@ -10,10 +10,14 @@ import { CompliancePage } from './pages/Compliance';
 import { AuditLogPage } from './pages/AuditLog';
 import { CustomRulesPage } from './pages/CustomRules';
 import { BlogPage } from './pages/Blog';
+import { TeamSetupPage } from './pages/TeamSetup';
+import { TeamMembersPage } from './pages/TeamMembers';
+import { JoinTeamPage } from './pages/JoinTeam';
 
 type Route =
   | 'landing' | 'editor' | 'pricing' | 'share' | 'analytics' | 'settings'
-  | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules' | 'blog';
+  | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules' | 'blog'
+  | 'team-setup' | 'team-members' | 'team-join';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -25,6 +29,9 @@ function routeFromLocation(): Route {
   if (h.startsWith('/team/approvals')) return 'team-approvals';
   if (h.startsWith('/team/audit')) return 'team-audit';
   if (h.startsWith('/team/rules')) return 'team-rules';
+  if (h.startsWith('/team/members')) return 'team-members';
+  if (h.startsWith('/team/join')) return 'team-join';
+  if (h.startsWith('/team/setup')) return 'team-setup';
   if (h.startsWith('/compliance')) return 'compliance';
   if (h.startsWith('/blog')) return 'blog';
   if (h.startsWith('/analytics')) return 'analytics';
@@ -68,6 +75,12 @@ function App() {
       return <CompliancePage />;
     case 'team-rules':
       return <CustomRulesPage />;
+    case 'team-setup':
+      return <TeamSetupPage />;
+    case 'team-members':
+      return <TeamMembersPage />;
+    case 'team-join':
+      return <JoinTeamPage />;
     case 'blog':
       return <BlogPage />;
     default:

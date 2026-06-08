@@ -1,11 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
+import { useTeam } from '../hooks/useTeam';
 import { getSupabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { auditLogToCsv, type AuditRow } from '../services/auditLog';
 
 // Sprint 8 Part 4 — audit log viewer at /team/audit (Business tier).
+// Sprint 9 — when the user belongs to a team, show the whole team's audit trail
+// (by team_id); otherwise fall back to their own events (by user_id).
 export function AuditLogPage() {
   const { appUser } = useAppUser();
+  const { team } = useTeam();
   const isBusiness = !!appUser && ['business', 'enterprise'].includes(appUser.plan);
   const [rows, setRows] = useState<AuditRow[]>([]);
 
@@ -13,14 +17,14 @@ export function AuditLogPage() {
     if (!isBusiness || !appUser?.id || !isSupabaseConfigured) return;
     const supabase = getSupabase();
     if (!supabase) return;
-    void supabase
+    const query = supabase
       .from('audit_log')
-      .select('created_at, event_type, event_data')
-      .eq('user_id', appUser.id)
+      .select('created_at, event_type, event_data, team_id, user_id')
       .order('created_at', { ascending: false })
-      .limit(200)
-      .then(({ data }) => setRows((data as AuditRow[]) ?? []));
-  }, [isBusiness, appUser?.id]);
+      .limit(200);
+    const scoped = team?.id ? query.eq('team_id', team.id) : query.eq('user_id', appUser.id);
+    void scoped.then(({ data }) => setRows((data as AuditRow[]) ?? []));
+  }, [isBusiness, appUser?.id, team?.id]);
 
   const exportCsv = () => {
     const blob = new Blob([auditLogToCsv(rows)], { type: 'text/csv' });

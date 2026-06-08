@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
+import { useTeam } from '../hooks/useTeam';
 import { getSupabase, isSupabaseConfigured } from '../services/supabaseClient';
 import {
   computeMemberLeaderboard,
@@ -10,11 +11,14 @@ import {
   type TeamValidationRecord,
 } from '../services/analytics';
 
-// Sprint 8 Part 2 — team analytics (Team+). Until a `team_members` table exists,
-// this aggregates the current user's validations as a single-member view; the
-// compute functions are team-shaped so it lights up fully once team infra lands.
+// Sprint 8 Part 2 — team analytics (Team+).
+// Sprint 9 — wired to the real team_members table: maps each member's
+// clerk_user_id to their app users.id, then aggregates every member's
+// validations into a genuine multi-user leaderboard. Falls back to the current
+// user's own validations when they have no team yet.
 export function TeamAnalyticsPage() {
   const { appUser } = useAppUser();
+  const { team, members } = useTeam();
   const isTeam = !!appUser && ['team', 'business', 'enterprise'].includes(appUser.plan);
   const [records, setRecords] = useState<TeamValidationRecord[]>([]);
 
@@ -23,16 +27,51 @@ export function TeamAnalyticsPage() {
     const supabase = getSupabase();
     if (!supabase) return;
     const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
-    void supabase
-      .from('validations')
-      .select('risk_score, error_count, warning_count, report, created_at')
-      .eq('user_id', appUser.id)
-      .gte('created_at', since)
-      .then(({ data }) => {
+
+    void (async () => {
+      // No team yet → single-member view of the current user.
+      if (!team || members.length === 0) {
+        const { data } = await supabase
+          .from('validations')
+          .select('risk_score, error_count, warning_count, report, created_at')
+          .eq('user_id', appUser.id)
+          .gte('created_at', since);
         const member = appUser.email || 'you';
         setRecords(((data as Omit<TeamValidationRecord, 'member'>[]) ?? []).map((r) => ({ ...r, member })));
-      });
-  }, [isTeam, appUser?.id, appUser?.email]);
+        return;
+      }
+
+      // Map team members (clerk_user_id) → app users.id + display email.
+      const clerkIds = members.map((m) => m.clerk_user_id);
+      const { data: userRows } = await supabase
+        .from('users')
+        .select('id, email, clerk_user_id')
+        .in('clerk_user_id', clerkIds);
+      const idToEmail = new Map<string, string>();
+      const userIds: string[] = [];
+      for (const u of (userRows as { id: string; email: string; clerk_user_id: string }[]) ?? []) {
+        userIds.push(u.id);
+        const member = members.find((m) => m.clerk_user_id === u.clerk_user_id);
+        idToEmail.set(u.id, member?.email || u.email);
+      }
+      if (userIds.length === 0) {
+        setRecords([]);
+        return;
+      }
+
+      const { data } = await supabase
+        .from('validations')
+        .select('user_id, risk_score, error_count, warning_count, report, created_at')
+        .in('user_id', userIds)
+        .gte('created_at', since);
+      setRecords(
+        ((data as (Omit<TeamValidationRecord, 'member'> & { user_id: string })[]) ?? []).map((r) => ({
+          ...r,
+          member: idToEmail.get(r.user_id) || 'unknown',
+        })),
+      );
+    })();
+  }, [isTeam, appUser?.id, appUser?.email, team?.id, members]);
 
   const data = useMemo(() => {
     if (!isTeam) return emptyTeamAnalytics();

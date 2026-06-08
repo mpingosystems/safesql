@@ -1,22 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
+import { useTeam } from '../hooks/useTeam';
 import { getSupabase, isSupabaseConfigured } from '../services/supabaseClient';
 import { approveRequest, getPendingRequests, rejectRequest, type ApprovalRow } from '../services/approvals';
 
 // Sprint 8 Part 3 — manager approval inbox at /team/approvals (Team+).
+// Sprint 9 — queries pending requests by the real team id (teams.id), falling
+// back to the user's own id namespace when they have no team yet.
 export function ApprovalInboxPage() {
   const { appUser } = useAppUser();
+  const { team } = useTeam();
   const isTeam = !!appUser && ['team', 'business', 'enterprise'].includes(appUser.plan);
   const [rows, setRows] = useState<ApprovalRow[]>([]);
   const [note, setNote] = useState('');
 
+  const teamId = team?.id ?? appUser?.id ?? '';
+
   const refresh = useCallback(async () => {
-    if (!isTeam || !isSupabaseConfigured) return;
+    if (!isTeam || !isSupabaseConfigured || !teamId) return;
     const supabase = getSupabase();
-    if (!supabase || !appUser) return;
-    // team_id stand-in until team_members exists: the user's own id namespace.
-    setRows(await getPendingRequests(appUser.id, supabase));
-  }, [isTeam, appUser?.id]);
+    if (!supabase) return;
+    setRows(await getPendingRequests(teamId, supabase));
+  }, [isTeam, teamId]);
 
   useEffect(() => {
     void refresh();

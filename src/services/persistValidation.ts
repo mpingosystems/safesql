@@ -8,6 +8,9 @@ export interface PersistValidationInput {
   report: ValidationReport;
   schemaId?: string;
   dialect?: string;
+  // Sprint 9 — real team id (teams.id) when the user belongs to a team, so the
+  // audit trail is attributable at the team level. Omit for solo users.
+  teamId?: string;
 }
 
 // Fire-and-forget persistence. Resolves to whether the write succeeded
@@ -45,7 +48,7 @@ export async function persistValidation(input: PersistValidationInput): Promise<
         sql_hash: sqlHash,
         dialect: input.dialect ?? 'postgresql',
       },
-      { user_id: input.appUserId },
+      { user_id: input.appUserId, team_id: input.teamId },
       supabase,
     );
     return true;

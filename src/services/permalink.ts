@@ -1,3 +1,4 @@
+import { SITE_URL } from '../config/constants';
 import type { SqlSource, ValidationReport } from '../types/validation';
 
 // PQ5 — shareable validation permalink. The full result (SQL, DDL, dialect,
@@ -43,7 +44,7 @@ export function decodeSharePayload(encoded: string): SharePayload | null {
 // Build the full shareable URL for the current origin.
 export function buildShareUrl(payload: SharePayload): string {
   const origin =
-    typeof window !== 'undefined' && window.location ? window.location.origin : 'https://safesql.realitydb.dev';
+    typeof window !== 'undefined' && window.location ? window.location.origin : SITE_URL;
   return `${origin}/#/v/${encodeSharePayload(payload)}`;
 }
 

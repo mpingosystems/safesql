@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabase } from './supabaseClient';
+import { SITE_URL } from '../config/constants';
 import type { SqlSource, ValidationIssue, ValidationReport } from '../types/validation';
 
 // Sprint 5 / v0.3.0 — DB-backed short-URL permalinks. A 12-char nanoid is the
@@ -31,13 +32,10 @@ export interface CreateSharedInput {
   source?: SqlSource;
 }
 
-// The short, Slack-shareable URL.
+// The short, Slack-shareable URL. Always built on the canonical domain so links
+// shared from any deployment point at safesql.dev.
 export function buildShortUrl(id: string): string {
-  const origin =
-    typeof window !== 'undefined' && window.location
-      ? window.location.origin
-      : 'https://safesql.realitydb.dev';
-  return `${origin}/v/${id}`;
+  return `${SITE_URL}/v/${id}`;
 }
 
 // Extract the share id from a `/v/{id}` pathname (returns null otherwise).

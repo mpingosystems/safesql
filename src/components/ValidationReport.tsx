@@ -49,7 +49,7 @@ export function ValidationReport({
   const [shortUrl, setShortUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState(false);
 
-  // Create a DB-backed short URL (safesql.realitydb.dev/v/{id}) and copy it.
+  // Create a DB-backed short URL (safesql.dev/v/{id}) and copy it.
   // Free + Pro alike — the permalink is the team-acquisition channel.
   const shareLink = async () => {
     if (!report || !sql || sharing) return;

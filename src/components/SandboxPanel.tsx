@@ -3,6 +3,7 @@ import type { SandboxResult, SchemaDefinition } from '../types/validation';
 import { runSandbox } from '../services/sandboxRunner';
 import { persistSandboxRun } from '../services/persistSandboxRun';
 import { FREE_LIMITS, isOverSandboxLimit, useAppUser } from '../hooks/useAppUser';
+import { AtelierCrossSell } from './AtelierCrossSell';
 
 interface SandboxPanelProps {
   sql: string;
@@ -121,6 +122,9 @@ export function SandboxPanel({ sql, schema, ddl, activeSchemaId }: SandboxPanelP
           )}
 
           {result && <SandboxResultView result={result} />}
+          <AtelierCrossSell
+            show={!!result && !result.executionError && result.totalRows > 0}
+          />
         </>
       )}
     </div>

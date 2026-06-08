@@ -6,6 +6,7 @@ import {
   generateApiKey,
   hashApiKey,
 } from '../services/apiKeys';
+import { computeBadgeCriteria } from '../services/badge';
 import { SITE_URL } from '../config/constants';
 
 interface ApiKeyRow {
@@ -24,6 +25,37 @@ export function SettingsPage() {
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [badgeStats, setBadgeStats] = useState({ count: 0, avg: 0, destructive: 0 });
+
+  useEffect(() => {
+    if (!appUser?.id || !isSupabaseConfigured) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    void supabase
+      .from('validations')
+      .select('risk_score, report')
+      .eq('user_id', appUser.id)
+      .gte('created_at', since)
+      .then(({ data }) => {
+        const rows = (data as { risk_score: number; report?: { errors?: { id: string }[] } | null }[]) ?? [];
+        const destructiveIds = ['MISSING_WHERE_DESTRUCTIVE', 'DESTRUCTIVE_DDL', 'DESTRUCTIVE_TRUNCATE'];
+        setBadgeStats({
+          count: rows.length,
+          avg: rows.length ? Math.round(rows.reduce((s, r) => s + (r.risk_score ?? 0), 0) / rows.length) : 0,
+          destructive: rows.filter((r) => (r.report?.errors ?? []).some((e) => destructiveIds.includes(e.id))).length,
+        });
+      });
+  }, [appUser?.id]);
+
+  const badge = computeBadgeCriteria({
+    validationCount: badgeStats.count,
+    averageScore: badgeStats.avg,
+    destructiveExecuted: badgeStats.destructive,
+  });
+  const badgeMarkdown = appUser
+    ? `![SafeSQL Certified](${SITE_URL}/api/badge/${appUser.id})`
+    : '';
 
   const refresh = useCallback(async () => {
     if (!appUser?.id || !isSupabaseConfigured) return;
@@ -134,6 +166,39 @@ export function SettingsPage() {
           </p>
         </>
       )}
+
+      {/* Your Badge */}
+      <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Your Badge</h2>
+      <div style={card}>
+        {appUser ? (
+          <>
+            <img src={`${SITE_URL}/api/badge/${appUser.id}`} alt="SafeSQL Certified badge" style={{ maxWidth: 320 }} />
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 12, color: '#a1a1aa', marginBottom: 4 }}>Embed in your README:</div>
+              <code style={keyBox}>{badgeMarkdown}</code>
+              <button
+                type="button"
+                onClick={() => void navigator.clipboard?.writeText(badgeMarkdown)}
+                style={{ ...revokeBtn, color: '#a78bfa' }}
+              >
+                Copy markdown
+              </button>
+            </div>
+            <ul style={{ marginTop: 12, paddingLeft: 18, fontSize: 13, lineHeight: 1.8 }}>
+              {badge.checks.map((c) => (
+                <li key={c.label} style={{ color: c.met ? '#22c55e' : '#71717a' }}>
+                  {c.met ? '✓' : '○'} {c.label}
+                </li>
+              ))}
+            </ul>
+            <div style={{ fontSize: 12, color: badge.certified ? '#22c55e' : '#71717a' }}>
+              {badge.certified ? 'Certified ✓' : 'Not yet certified — keep validating.'}
+            </div>
+          </>
+        ) : (
+          <p style={{ color: '#71717a', fontSize: 13 }}>Sign in to see your SafeSQL Certified badge.</p>
+        )}
+      </div>
     </Shell>
   );
 }

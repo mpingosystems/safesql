@@ -76,8 +76,10 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   issues.push(...detectSuspiciousJoinKey(ast, request.schema));
   issues.push(...detectFanOutJoins(ast));
   issues.push(...detectScdJoinWithoutEffectiveDate(ast));
-  issues.push(...detectIntegerDivision(ast));
+  issues.push(...detectIntegerDivision(ast, request.schema));
   issues.push(...detectCountParentAfterChildJoin(ast));
+  issues.push(...detectCountStarVsCountCol(ast, request.schema));
+  issues.push(...detectHavingWithoutGroupBy(ast));
   issues.push(...detectMissingTimeFilter(ast, request.schema));
   issues.push(...detectDialectMismatch(request.sql, request.dialect));
   issues.push(...detectNonDeterministicWindow(ast));
@@ -1405,29 +1407,76 @@ function findDivision(node: any): any {
   return null;
 }
 
-// ── A1: Integer division truncation (no schema) ──────────────────────────────
-function detectIntegerDivision(ast: any): ValidationIssue[] {
+// Integer-type matcher for a DDL type string.
+function isIntegerType(type: string | undefined): boolean {
+  const t = String(type ?? '').toUpperCase();
+  return (
+    t === 'INT' || t === 'INTEGER' || t === 'BIGINT' || t === 'SMALLINT' || t.includes('SERIAL')
+  );
+}
+
+// ── A1 / D13: Integer division truncation (schema-aware) ─────────────────────
+// Division where BOTH operands are integer-producing truncates toward zero, so
+// any true ratio < 1 silently becomes 0 (the analyst expects 0.73, gets 0).
+// Integer-producing operands:
+//   - COUNT(...)                         → always integer (no schema needed)
+//   - integer literal                    → no schema needed
+//   - a column typed INTEGER per schema  → e.g. completed / total
+//   - SUM/MIN/MAX over an integer column → schema needed
+// Without a schema only the COUNT / literal cases are detectable.
+function detectIntegerDivision(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  if (schema) for (const t of schema.tables) tableByName.set(t.name, t);
+
   for (const stmt of asStatements(ast)) {
     if (stmt?.type !== 'select') continue;
+
+    const aliasMap = buildAliasMap(stmt);
+    const singleTable =
+      Array.isArray(stmt.from) && stmt.from.length === 1 && typeof stmt.from[0]?.table === 'string'
+        ? (stmt.from[0].table as string)
+        : null;
+
+    // Resolve a column_ref's declared type via the schema, if known.
+    const columnType = (node: any): string | null => {
+      if (!schema || node?.type !== 'column_ref') return null;
+      const colName = getColumnName(node);
+      const q = getColumnTable(node);
+      const realTable = q ? aliasMap.get(q) ?? q : singleTable;
+      if (!colName || !realTable) return null;
+      const t = tableByName.get(realTable);
+      return t?.columns.find((c) => c.name === colName)?.type ?? null;
+    };
+
+    const isIntegerProducing = (n: any): boolean => {
+      if (isCountAgg(n)) return true;
+      if (n?.type === 'number' && Number.isInteger(n.value)) return true;
+      if (n?.type === 'column_ref') return isIntegerType(columnType(n) ?? undefined);
+      if (n?.type === 'aggr_func') {
+        const fn = String(n.name ?? '').toLowerCase();
+        if (fn === 'sum' || fn === 'min' || fn === 'max') {
+          const arg = n.args?.expr;
+          return arg?.type === 'column_ref' && isIntegerType(columnType(arg) ?? undefined);
+        }
+      }
+      return false;
+    };
+
     let flagged = false;
     for (const col of stmt.columns ?? []) {
       if (flagged) break;
       const div = findDivision(col?.expr);
       if (!div) continue;
       if (div.left?.type === 'cast' || div.right?.type === 'cast') continue; // already cast
-      const intish = (n: any) =>
-        isCountAgg(n) || (n?.type === 'number' && Number.isInteger(n.value));
-      if (!intish(div.left) && !intish(div.right)) continue;
-      // At least one COUNT keeps this high-confidence (the classic ratio bug).
-      if (!isCountAgg(div.left) && !isCountAgg(div.right)) continue;
+      if (!isIntegerProducing(div.left) || !isIntegerProducing(div.right)) continue;
       flagged = true;
       issues.push({
         id: 'INTEGER_DIVISION_RISK',
         severity: 'warning',
         title: 'Integer division truncates toward zero',
-        description: `Dividing two integer expressions (e.g. COUNT(...) / COUNT(...)) performs integer division, so any ratio below 1 truncates to 0.`,
-        fix: `Cast the numerator to a decimal: COUNT(...)::decimal / COUNT(...) (PostgreSQL) or CAST(... AS FLOAT) / ... .`,
+        description: `Both sides of this division are integers (e.g. COUNT(...)/COUNT(...) or integer columns), so PostgreSQL performs integer division — any true ratio below 1 silently becomes 0.`,
+        fix: `Cast the numerator to a decimal: CAST(numerator AS DECIMAL) / denominator, or numerator::decimal / denominator in PostgreSQL.`,
         offendingClause: 'SELECT',
         metadata: { operator: '/' },
       });
@@ -1587,5 +1636,80 @@ function detectNonDeterministicWindow(ast: any): ValidationIssue[] {
     }
   };
   for (const stmt of asStatements(ast)) visit(stmt);
+  return issues;
+}
+
+// ── D14: COUNT(nullable_col) vs COUNT(*) (schema required) ────────────────────
+// COUNT(col) silently skips rows where col is NULL, so it can be lower than the
+// COUNT(*) total an analyst expected. Distinct from D12 (which is about AVG).
+function detectCountStarVsCountCol(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  if (!schema) return [];
+  const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  for (const t of schema.tables) tableByName.set(t.name, t);
+
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select') continue;
+    const aliasMap = buildAliasMap(stmt);
+    const singleTable =
+      Array.isArray(stmt.from) && stmt.from.length === 1 && typeof stmt.from[0]?.table === 'string'
+        ? (stmt.from[0].table as string)
+        : null;
+    const seen = new Set<string>();
+
+    for (const col of stmt.columns ?? []) {
+      const e = col?.expr;
+      if (e?.type !== 'aggr_func' || String(e.name ?? '').toLowerCase() !== 'count') continue;
+      if (e.args?.distinct) continue; // COUNT(DISTINCT col) is a deliberate choice
+      const arg = e.args?.expr;
+      if (!arg || arg.type !== 'column_ref') continue; // COUNT(*) is fine
+      const colName = getColumnName(arg);
+      const q = getColumnTable(arg);
+      const realTable = q ? aliasMap.get(q) ?? q : singleTable;
+      if (!colName || !realTable) continue;
+      const t = tableByName.get(realTable);
+      const c = t?.columns.find((cc) => cc.name === colName);
+      if (!c) continue; // unknown column is D9's job
+      if (!c.nullable) continue; // NOT NULL → COUNT(col) === COUNT(*), no risk
+      const key = `${realTable}.${colName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      issues.push({
+        id: 'COUNT_STAR_VS_COUNT_COL',
+        severity: 'suggestion',
+        title: `COUNT(${colName}) skips NULL rows`,
+        description: `"${realTable}.${colName}" is nullable, so COUNT(${colName}) counts only non-NULL values — it can be lower than the total row count.`,
+        fix: `Use COUNT(*) if you want the total number of rows; keep COUNT(${colName}) only if you specifically want non-NULL ${colName} values.`,
+        offendingClause: 'SELECT',
+        offendingTable: realTable,
+        offendingColumn: colName,
+        metadata: { table: realTable, column: colName },
+      });
+    }
+  }
+  return issues;
+}
+
+// ── D15: HAVING without GROUP BY (no schema) ─────────────────────────────────
+// HAVING filters aggregated groups; with no GROUP BY there is exactly one group
+// (the whole table), so a HAVING here is almost always a misplaced WHERE.
+function detectHavingWithoutGroupBy(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !stmt.having) continue;
+    const gb = stmt.groupby;
+    const hasGroupBy =
+      !!gb && (Array.isArray(gb) ? gb.length > 0 : Array.isArray(gb.columns) ? gb.columns.length > 0 : false);
+    if (hasGroupBy) continue;
+    issues.push({
+      id: 'HAVING_WITHOUT_GROUP_BY',
+      severity: 'error',
+      title: 'HAVING without GROUP BY',
+      description: `This query has a HAVING clause but no GROUP BY. HAVING filters aggregated groups; with no GROUP BY the entire table is a single group, so the condition is almost certainly misplaced.`,
+      fix: `Add a GROUP BY for the grain you want, or move the condition into the WHERE clause if it filters individual rows.`,
+      offendingClause: 'HAVING',
+      metadata: {},
+    });
+  }
   return issues;
 }

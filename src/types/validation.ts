@@ -74,6 +74,9 @@ export type DetectorId =
   | 'SCD_JOIN_WITHOUT_EFFECTIVE_DATE'
   | 'INTEGER_DIVISION_RISK'
   | 'COUNT_PARENT_AFTER_CHILD_JOIN'
+  // ── Sprint 4 additions ────────────────────────────────────────────────────
+  | 'COUNT_STAR_VS_COUNT_COL'
+  | 'HAVING_WITHOUT_GROUP_BY'
   | 'MISSING_TIME_FILTER'
   | 'DIALECT_MISMATCH'
   | 'NON_DETERMINISTIC_WINDOW_ORDER'

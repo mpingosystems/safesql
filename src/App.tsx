@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { LandingPage } from './pages/Landing';
 import { EditorPage } from './pages/Editor';
 import { ShareViewPage } from './pages/ShareView';
+import { AnalyticsPage } from './pages/Analytics';
 
-type Route = 'landing' | 'editor' | 'pricing' | 'share';
+type Route = 'landing' | 'editor' | 'pricing' | 'share' | 'analytics';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -11,6 +12,7 @@ function routeFromLocation(): Route {
   if (/^\/v\/[^/]+/.test(window.location.pathname)) return 'share';
   const h = window.location.hash.replace(/^#/, '').replace(/\?.*$/, '');
   if (h.startsWith('/editor')) return 'editor';
+  if (h.startsWith('/analytics')) return 'analytics';
   if (h.startsWith('/pricing')) return 'pricing';
   if (h.startsWith('/v/')) return 'share';
   return 'landing';
@@ -36,6 +38,8 @@ function App() {
       return <PricingStub />;
     case 'share':
       return <ShareViewPage />;
+    case 'analytics':
+      return <AnalyticsPage />;
     default:
       return <LandingPage />;
   }

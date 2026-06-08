@@ -42,6 +42,13 @@ JOIN orders o ON u.id = o.user_id
 JOIN order_items oi ON o.id = oi.order_id;
 `;
 
+const navLink: React.CSSProperties = {
+  color: '#a1a1aa',
+  textDecoration: 'none',
+  fontSize: 12,
+  fontWeight: 600,
+};
+
 // "Open in SafeSQL" (from a shared link) and legacy hash permalinks stash the
 // SQL here, then bounce to the editor; we pick it up once on mount.
 function loadInitialSql(): string {
@@ -211,7 +218,9 @@ export function EditorPage() {
             />
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <a href="#/analytics" style={navLink}>Analytics</a>
+          <a href="#/pricing" style={navLink}>Pricing</a>
           <AuthControls />
         </div>
       </header>

@@ -57,6 +57,42 @@ export function SettingsPage() {
     ? `![SafeSQL Certified](${SITE_URL}/api/badge/${appUser.id})`
     : '';
 
+  // ── Notifications (Slack webhook) ──────────────────────────────────────────
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [trigger, setTrigger] = useState<'error' | 'warning' | 'all'>('error');
+  const [webhookMsg, setWebhookMsg] = useState<string | null>(null);
+
+  const testWebhook = async () => {
+    if (!webhookUrl) return;
+    setWebhookMsg('Sending…');
+    try {
+      const res = await fetch('/api/webhook/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ webhook_url: webhookUrl }),
+      });
+      const data = await res.json();
+      setWebhookMsg(data.status === 'delivered' ? '✓ Test delivered' : `Failed (${data.http_status})`);
+    } catch {
+      setWebhookMsg('Network error');
+    }
+  };
+
+  const saveWebhook = async () => {
+    if (!appUser?.id || !webhookUrl) return;
+    const supabase = getSupabase();
+    if (!supabase) return;
+    const triggerArr = trigger === 'all' ? ['all'] : trigger === 'warning' ? ['error', 'warning'] : ['error'];
+    const { error } = await supabase.from('webhook_configs').insert({
+      user_id: appUser.id,
+      webhook_url: webhookUrl,
+      webhook_type: 'slack',
+      trigger_on: triggerArr,
+      active: true,
+    });
+    setWebhookMsg(error ? 'Save failed (migration applied?)' : '✓ Webhook saved');
+  };
+
   const refresh = useCallback(async () => {
     if (!appUser?.id || !isSupabaseConfigured) return;
     const supabase = getSupabase();
@@ -166,6 +202,34 @@ export function SettingsPage() {
           </p>
         </>
       )}
+
+      {/* Notifications */}
+      <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Notifications</h2>
+      <div style={card}>
+        <p style={{ color: '#a1a1aa', fontSize: 12.5, marginTop: 0 }}>
+          Get a Slack alert when SafeSQL catches a risky query.
+        </p>
+        <input
+          type="url"
+          placeholder="https://hooks.slack.com/services/…"
+          value={webhookUrl}
+          onChange={(e) => setWebhookUrl(e.target.value)}
+          style={{ width: '100%', background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 5, padding: '7px 10px', fontSize: 12.5 }}
+        />
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: '#a1a1aa' }}>
+            Trigger:{' '}
+            <select value={trigger} onChange={(e) => setTrigger(e.target.value as 'error' | 'warning' | 'all')} style={{ background: '#18181b', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
+              <option value="error">Errors only</option>
+              <option value="warning">Errors + Warnings</option>
+              <option value="all">All validations</option>
+            </select>
+          </label>
+          <button type="button" onClick={() => void testWebhook()} disabled={!webhookUrl} style={{ ...revokeBtn, color: '#a78bfa' }}>Test</button>
+          <button type="button" onClick={() => void saveWebhook()} disabled={!webhookUrl} style={primaryBtn}>Save</button>
+          {webhookMsg && <span style={{ fontSize: 12, color: webhookMsg.startsWith('✓') ? '#22c55e' : '#f59e0b' }}>{webhookMsg}</span>}
+        </div>
+      </div>
 
       {/* Your Badge */}
       <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Your Badge</h2>

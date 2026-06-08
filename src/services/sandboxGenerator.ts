@@ -244,15 +244,19 @@ function semanticValue(name: string, type: string, rng: Rng): unknown {
   if (name.includes('phone') || name.includes('mobile') || name === 'tel') {
     return `+1${rng.int(2000000000, 9999999999)}`;
   }
-  // Geographic state BEFORE the status check. A "status" column never contains
-  // the substring "state", so this only reroutes genuine state / state_code
-  // columns (which previously fell into the status enum, returning "pending").
-  if (name.includes('state') && name.includes('code')) {
-    return rng.pick(STATE_CODES);
-  }
-  if (name.includes('state') && !name.includes('status')) {
-    return rng.pick(US_STATES);
-  }
+  // Geographic state BEFORE the status check, using word-boundary matching so
+  // "state" as a whole token is required — `real_estate`/`estate` no longer
+  // mis-match (they only *contain* the letters "state").
+  // NOTE: the `_state_` substring clause from the patch spec is intentionally
+  // omitted — it would re-match `tri_state_area`, which the spec also lists as
+  // "correctly ignored". The four required positive cases (state, billing_state,
+  // shipping_state, state_code) don't need it, so dropping it satisfies the full
+  // stated behavior (handles those, ignores real_estate / estate / tri_state_area).
+  const isStateCodeColumn = name === 'state_code' || name.endsWith('_state_code');
+  const isStateColumn =
+    name === 'state' || name.startsWith('state_') || name.endsWith('_state');
+  if (isStateCodeColumn) return rng.pick(STATE_CODES);
+  if (isStateColumn) return rng.pick(US_STATES);
   if (name === 'status' || name.endsWith('_status')) {
     return rng.pick(STATUSES);
   }

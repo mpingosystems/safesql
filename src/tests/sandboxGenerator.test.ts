@@ -255,6 +255,21 @@ describe('semantic column inference', () => {
     expect(statuses).toContain(String(sampleColumnValue('account_status', 'text', 2)));
     expect(statuses).toContain(String(sampleColumnValue('order_status', 'text', 3)));
   });
+
+  it('billing_state / shipping_state → US state (word-boundary match)', () => {
+    for (let s = 1; s <= 10; s++) {
+      expect(US_STATES).toContain(String(sampleColumnValue('billing_state', 'text', s)));
+      expect(US_STATES).toContain(String(sampleColumnValue('shipping_state', 'text', s)));
+    }
+  });
+
+  it('real_estate / estate / tri_state_area → NOT a US state (falls through)', () => {
+    for (let s = 1; s <= 10; s++) {
+      expect(US_STATES).not.toContain(String(sampleColumnValue('real_estate', 'text', s)));
+      expect(US_STATES).not.toContain(String(sampleColumnValue('estate', 'text', s)));
+      expect(US_STATES).not.toContain(String(sampleColumnValue('tri_state_area', 'text', s)));
+    }
+  });
 });
 
 // Mirror of the generator's pools so the state tests can assert membership.

@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { SchemaDefinition } from '../types/validation';
 import { parseDDL } from '../services/schemaParser';
 import { useSchemaLibrary, type SavedSchema } from '../hooks/useSchemaLibrary';
+import { listSchemaConnections, type SchemaConnectionSummary } from '../services/schemaConnections';
 
 interface SchemaPanelProps {
   schema: SchemaDefinition | null;
@@ -26,6 +27,27 @@ export function SchemaPanel({
   const [savePromptOpen, setSavePromptOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
   const { schemas, saveSchema, deleteSchema, isLoading } = useSchemaLibrary(appUserId);
+
+  // Sprint 9 — live schema connections (auto-imported, zero DDL paste).
+  const [connections, setConnections] = useState<SchemaConnectionSummary[]>([]);
+  useEffect(() => {
+    if (!appUserId) {
+      setConnections([]);
+      return;
+    }
+    void listSchemaConnections(appUserId).then(setConnections);
+  }, [appUserId]);
+
+  const handleLoadConnection = (conn: SchemaConnectionSummary) => {
+    if (!conn.schema_cache || conn.schema_cache.tables.length === 0) {
+      setError('This connection has no synced schema yet — run "Sync now" in Settings.');
+      return;
+    }
+    setError(null);
+    onActiveSchemaChange(null);
+    onSchemaChange(conn.schema_cache);
+    onDdlChange(`-- Loaded from connection: ${conn.name} (${conn.dialect})\n-- ${conn.schema_cache.tables.length} tables auto-imported`);
+  };
 
   const isAuthed = !!appUserId;
 
@@ -126,6 +148,28 @@ export function SchemaPanel({
           outline: 'none',
         }}
       />
+
+      {connections.length > 0 && (
+        <div style={{ padding: '8px 10px', borderBottom: '1px solid #27272a', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ fontSize: 11, color: '#a1a1aa' }}>Load from:</span>
+          <select
+            defaultValue=""
+            onChange={(e) => {
+              const c = connections.find((x) => x.id === e.target.value);
+              if (c) handleLoadConnection(c);
+              e.target.value = '';
+            }}
+            style={{ flex: 1, background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 4, padding: '4px 6px', fontSize: 11.5 }}
+          >
+            <option value="" disabled>DDL paste · or a connection…</option>
+            {connections.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.dialect}){c.last_synced_at ? '' : ' — not synced'}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 10 }}>
         {error && (

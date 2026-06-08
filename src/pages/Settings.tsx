@@ -7,6 +7,8 @@ import {
   hashApiKey,
 } from '../services/apiKeys';
 import { computeBadgeCriteria } from '../services/badge';
+import { listSchemaConnections, type SchemaConnectionSummary } from '../services/schemaConnections';
+import { SUPPORTED_DIALECTS } from '../services/schemaConnector';
 import { SITE_URL } from '../config/constants';
 
 interface ApiKeyRow {
@@ -56,6 +58,69 @@ export function SettingsPage() {
   const badgeMarkdown = appUser
     ? `![SafeSQL Certified](${SITE_URL}/api/badge/${appUser.id})`
     : '';
+
+  // ── Schema Connections (Sprint 9) ──────────────────────────────────────────
+  const [connections, setConnections] = useState<SchemaConnectionSummary[]>([]);
+  const [connName, setConnName] = useState('');
+  const [connDialect, setConnDialect] = useState('postgresql');
+  const [connString, setConnString] = useState('');
+  const [connApiKey, setConnApiKey] = useState('');
+  const [connMsg, setConnMsg] = useState<string | null>(null);
+
+  const refreshConnections = useCallback(async () => {
+    if (!appUser?.id) return;
+    setConnections(await listSchemaConnections(appUser.id));
+  }, [appUser?.id]);
+
+  useEffect(() => {
+    void refreshConnections();
+  }, [refreshConnections]);
+
+  const addConnection = async () => {
+    if (!connName.trim() || !connString.trim() || !connApiKey.trim()) {
+      setConnMsg('Name, connection string and an API key are all required.');
+      return;
+    }
+    setConnMsg('Saving…');
+    try {
+      const res = await fetch('/api/schema/connections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connApiKey.trim()}` },
+        body: JSON.stringify({ name: connName, dialect: connDialect, connection_string: connString }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setConnMsg('✓ Connection saved');
+        setConnName('');
+        setConnString('');
+        await refreshConnections();
+      } else {
+        setConnMsg(data.error ?? 'Save failed');
+      }
+    } catch {
+      setConnMsg('Network error');
+    }
+  };
+
+  const syncConnection = async (id: string) => {
+    if (!connApiKey.trim()) {
+      setConnMsg('Paste an API key above to sync.');
+      return;
+    }
+    setConnMsg('Syncing…');
+    try {
+      const res = await fetch('/api/schema/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connApiKey.trim()}` },
+        body: JSON.stringify({ connection_id: id }),
+      });
+      const data = await res.json();
+      setConnMsg(res.ok ? `✓ Synced ${data.tableCount} tables` : data.error ?? 'Sync failed');
+      await refreshConnections();
+    } catch {
+      setConnMsg('Network error');
+    }
+  };
 
   // ── Notifications (Slack webhook) ──────────────────────────────────────────
   const [webhookUrl, setWebhookUrl] = useState('');
@@ -203,6 +268,63 @@ export function SettingsPage() {
         </>
       )}
 
+      {/* Schema Connections */}
+      <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Schema Connections</h2>
+      {!isPro ? (
+        <div style={card}>
+          <p style={{ color: '#a1a1aa', fontSize: 13 }}>
+            Connect a read-only database to auto-import your schema (no more DDL paste).
+            Available on Pro and above. <a href="#/pricing" style={{ color: '#a78bfa' }}>Upgrade →</a>
+          </p>
+        </div>
+      ) : (
+        <div style={card}>
+          <p style={{ color: '#a1a1aa', fontSize: 12.5, marginTop: 0 }}>
+            Auto-import your schema from a read-only connection. The connection string is
+            AES-256 encrypted server-side — never stored in plaintext.{' '}
+            <strong style={{ color: '#d4d4d8' }}>PostgreSQL</strong> is supported today; MySQL, BigQuery
+            and Snowflake are coming soon.
+          </p>
+
+          {connections.length > 0 && (
+            <table style={tableStyle}>
+              <thead><tr>{['Name', 'Dialect', 'Last synced', ''].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {connections.map((c) => (
+                  <tr key={c.id}>
+                    <td style={td}>{c.name}</td>
+                    <td style={td}>{c.dialect}</td>
+                    <td style={td}>{c.last_synced_at?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                    <td style={td}>
+                      <button type="button" onClick={() => void syncConnection(c.id)} style={{ ...revokeBtn, color: '#a78bfa' }}>Sync now</button>
+                      <a href="#/editor" style={{ color: '#71717a', fontSize: 12, marginLeft: 8 }}>Use in editor →</a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
+            <input value={connName} onChange={(e) => setConnName(e.target.value)} placeholder="Display name (e.g. Production DB)" style={inputStyle} />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <select value={connDialect} onChange={(e) => setConnDialect(e.target.value)} style={{ ...inputStyle, flex: '0 0 160px' }}>
+                {SUPPORTED_DIALECTS.map((d) => <option key={d} value={d}>{d}</option>)}
+                <option value="mysql" disabled>mysql (soon)</option>
+                <option value="bigquery" disabled>bigquery (soon)</option>
+                <option value="snowflake" disabled>snowflake (soon)</option>
+              </select>
+              <input value={connString} onChange={(e) => setConnString(e.target.value)} placeholder="postgresql://user:pw@host:5432/db" style={{ ...inputStyle, flex: 1 }} />
+            </div>
+            <input value={connApiKey} onChange={(e) => setConnApiKey(e.target.value)} placeholder="Your API key (ssk_live_…) — used to encrypt + sync" style={inputStyle} />
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button type="button" onClick={() => void addConnection()} style={primaryBtn}>Add connection</button>
+              {connMsg && <span style={{ fontSize: 12, color: connMsg.startsWith('✓') ? '#22c55e' : '#f59e0b' }}>{connMsg}</span>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Notifications */}
       <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Notifications</h2>
       <div style={card}>
@@ -284,3 +406,4 @@ const tableStyle: React.CSSProperties = { width: '100%', borderCollapse: 'collap
 const th: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', color: '#a1a1aa', borderBottom: '1px solid #27272a' };
 const td: React.CSSProperties = { padding: '8px 10px', borderBottom: '1px solid #18181b', color: '#d4d4d8' };
 const tdMuted: React.CSSProperties = { padding: 12, color: '#52525b' };
+const inputStyle: React.CSSProperties = { width: '100%', background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 5, padding: '7px 10px', fontSize: 12.5 };

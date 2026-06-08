@@ -256,18 +256,22 @@ describe('semantic column inference', () => {
     expect(statuses).toContain(String(sampleColumnValue('order_status', 'text', 3)));
   });
 
-  it('billing_state / shipping_state → US state (word-boundary match)', () => {
-    for (let s = 1; s <= 10; s++) {
-      expect(US_STATES).toContain(String(sampleColumnValue('billing_state', 'text', s)));
-      expect(US_STATES).toContain(String(sampleColumnValue('shipping_state', 'text', s)));
+  it('state token columns → US state (prefix / suffix / middle token)', () => {
+    const stateCols = [
+      'state', 'billing_state', 'shipping_state',
+      'home_state_name', 'primary_state_id', 'mailing_state_region', 'tri_state_area',
+    ];
+    for (const col of stateCols) {
+      for (let s = 1; s <= 10; s++) {
+        expect(US_STATES).toContain(String(sampleColumnValue(col, 'text', s)));
+      }
     }
   });
 
-  it('real_estate / estate / tri_state_area → NOT a US state (falls through)', () => {
+  it('real_estate / estate → NOT a US state (no underscore boundary)', () => {
     for (let s = 1; s <= 10; s++) {
       expect(US_STATES).not.toContain(String(sampleColumnValue('real_estate', 'text', s)));
       expect(US_STATES).not.toContain(String(sampleColumnValue('estate', 'text', s)));
-      expect(US_STATES).not.toContain(String(sampleColumnValue('tri_state_area', 'text', s)));
     }
   });
 });

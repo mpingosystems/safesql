@@ -8,10 +8,11 @@ import { TeamAnalyticsPage } from './pages/TeamAnalytics';
 import { ApprovalInboxPage } from './pages/ApprovalInbox';
 import { CompliancePage } from './pages/Compliance';
 import { AuditLogPage } from './pages/AuditLog';
+import { CustomRulesPage } from './pages/CustomRules';
 
 type Route =
   | 'landing' | 'editor' | 'pricing' | 'share' | 'analytics' | 'settings'
-  | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance';
+  | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -22,6 +23,7 @@ function routeFromLocation(): Route {
   if (h.startsWith('/team/analytics')) return 'team-analytics';
   if (h.startsWith('/team/approvals')) return 'team-approvals';
   if (h.startsWith('/team/audit')) return 'team-audit';
+  if (h.startsWith('/team/rules')) return 'team-rules';
   if (h.startsWith('/compliance')) return 'compliance';
   if (h.startsWith('/analytics')) return 'analytics';
   if (h.startsWith('/settings')) return 'settings';
@@ -62,6 +64,8 @@ function App() {
       return <AuditLogPage />;
     case 'compliance':
       return <CompliancePage />;
+    case 'team-rules':
+      return <CustomRulesPage />;
     default:
       return <LandingPage />;
   }

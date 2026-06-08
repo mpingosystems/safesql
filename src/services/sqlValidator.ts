@@ -7,6 +7,7 @@ import type {
   ValidationRequest,
 } from '../types/validation';
 import { unwrapName } from './schemaParser';
+import { evaluateCustomRules } from './customRuleEngine';
 
 const parser = new Parser();
 
@@ -107,6 +108,11 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   issues.push(...detectMissingTimeFilterBareScan(ast));
   issues.push(...detectImplicitTimezone(ast));
   issues.push(...detectDialectLimitTop(request.sql, request.dialect));
+
+  // ── Sprint 8: team custom rules (Business tier) — after the built-in detectors ─
+  if (request.customRules && request.customRules.length > 0) {
+    issues.push(...evaluateCustomRules(request.sql, ast, request.schema, request.customRules));
+  }
 
   // Issue Object Contract (§10): make sure every finding carries the offending
   // anchor fields + a scoreImpact, deriving them from legacy `metadata`/severity

@@ -8,6 +8,26 @@ export interface ValidationRequest {
   // PQ1 — LLM source tagging. Where the SQL came from, so AI-generated query
   // quality can be tracked separately from human-authored SQL.
   source?: SqlSource;
+  // Sprint 8 Part 5 — team custom rules, evaluated after the built-in detectors.
+  // The caller (Business tier) supplies these; omit them to skip evaluation.
+  customRules?: CustomRule[];
+}
+
+export type CustomRuleType =
+  | 'required_filter'
+  | 'forbidden_table'
+  | 'required_join_condition'
+  | 'forbidden_pattern'
+  | 'required_column_qualification';
+
+export interface CustomRule {
+  id: string;
+  name: string;
+  description?: string;
+  rule_type: CustomRuleType;
+  config: Record<string, unknown>;
+  severity?: 'error' | 'warning' | 'suggestion';
+  active?: boolean;
 }
 
 export interface ValidationReport {
@@ -86,6 +106,7 @@ export type DetectorId =
   | 'COALESCE_IN_JOIN_KEY'
   | 'IMPLICIT_TIMEZONE'
   | 'WINDOW_MISSING_ORDER'
+  | 'CUSTOM_RULE'
   | 'SYNTAX_ERROR';
 
 export interface SchemaDefinition {

@@ -5,7 +5,10 @@ import { ShareViewPage } from './pages/ShareView';
 
 type Route = 'landing' | 'editor' | 'pricing' | 'share';
 
-function routeFromHash(): Route {
+function routeFromLocation(): Route {
+  // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
+  // fallback). Legacy hash permalink (#/v/<payload>) is handled below.
+  if (/^\/v\/[^/]+/.test(window.location.pathname)) return 'share';
   const h = window.location.hash.replace(/^#/, '').replace(/\?.*$/, '');
   if (h.startsWith('/editor')) return 'editor';
   if (h.startsWith('/pricing')) return 'pricing';
@@ -14,12 +17,16 @@ function routeFromHash(): Route {
 }
 
 function App() {
-  const [route, setRoute] = useState<Route>(routeFromHash);
+  const [route, setRoute] = useState<Route>(routeFromLocation);
 
   useEffect(() => {
-    const onHashChange = () => setRoute(routeFromHash());
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
+    const onChange = () => setRoute(routeFromLocation());
+    window.addEventListener('hashchange', onChange);
+    window.addEventListener('popstate', onChange);
+    return () => {
+      window.removeEventListener('hashchange', onChange);
+      window.removeEventListener('popstate', onChange);
+    };
   }, []);
 
   switch (route) {

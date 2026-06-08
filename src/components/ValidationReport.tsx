@@ -7,7 +7,7 @@ import type {
 import { RiskScore } from './RiskScore';
 import { IssueCard } from './IssueCard';
 import { ProofPanel } from './ProofPanel';
-import { buildShareUrl } from '../services/permalink';
+import { createSharedValidation } from '../services/sharedValidation';
 
 interface ValidationReportProps {
   report: Report | null;
@@ -45,24 +45,35 @@ export function ValidationReport({
 }: ValidationReportProps) {
   const [tab, setTab] = useState<Tab>('errors');
   const [copied, setCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shortUrl, setShortUrl] = useState<string | null>(null);
+  const [shareError, setShareError] = useState(false);
 
-  const copyLink = async () => {
-    if (!report || !sql) return;
-    const url = buildShareUrl({
-      v: 1,
+  // Create a DB-backed short URL (safesql.realitydb.dev/v/{id}) and copy it.
+  // Free + Pro alike — the permalink is the team-acquisition channel.
+  const shareLink = async () => {
+    if (!report || !sql || sharing) return;
+    setSharing(true);
+    setShareError(false);
+    const res = await createSharedValidation({
       sql,
-      ddl: ddl || undefined,
-      dialect: dialect ?? 'postgresql',
-      source: report.source,
       report,
+      dialect: dialect ?? 'postgresql',
+      ddl: ddl || undefined,
+      source: report.source,
     });
+    setSharing(false);
+    if (!res) {
+      setShareError(true);
+      return;
+    }
+    setShortUrl(res.url);
     try {
-      await navigator.clipboard.writeText(url);
+      await navigator.clipboard.writeText(res.url);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Clipboard may be blocked; surface the URL via prompt as a fallback.
-      window.prompt('Copy this validation link:', url);
+      window.prompt('Copy this validation link:', res.url);
     }
   };
 
@@ -128,25 +139,39 @@ export function ValidationReport({
         {sql && (
           <button
             type="button"
-            onClick={() => void copyLink()}
-            title="Copy a shareable link to this validation"
+            onClick={() => void shareLink()}
+            disabled={sharing}
+            title="Create a short, shareable link to this validation"
             style={{
               background: 'transparent',
               border: '1px solid #27272a',
               borderRadius: 5,
-              color: copied ? '#22c55e' : '#a1a1aa',
+              color: shareError ? '#f87171' : copied ? '#22c55e' : '#a1a1aa',
               fontSize: 11,
               padding: '3px 8px',
-              cursor: 'pointer',
+              cursor: sharing ? 'wait' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: 5,
             }}
           >
-            {copied ? '✓ Copied' : '🔗 Copy link'}
+            {sharing ? 'Creating…' : shareError ? 'Link unavailable' : copied ? '✓ Copied' : '🔗 Share'}
           </button>
         )}
       </div>
+      {shortUrl && (
+        <div
+          style={{
+            padding: '0 12px 6px',
+            fontSize: 11,
+            color: '#71717a',
+            display: 'flex',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <code style={{ color: '#a78bfa', wordBreak: 'break-all' }}>{shortUrl}</code>
+        </div>
+      )}
 
       <div
         role="tablist"

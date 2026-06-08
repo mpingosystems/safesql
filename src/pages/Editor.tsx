@@ -42,8 +42,24 @@ JOIN orders o ON u.id = o.user_id
 JOIN order_items oi ON o.id = oi.order_id;
 `;
 
+// "Open in SafeSQL" (from a shared link) and legacy hash permalinks stash the
+// SQL here, then bounce to the editor; we pick it up once on mount.
+function loadInitialSql(): string {
+  if (typeof window === 'undefined') return DEFAULT_SQL;
+  try {
+    const preload = window.sessionStorage.getItem('safesql.preloadSql');
+    if (preload) {
+      window.sessionStorage.removeItem('safesql.preloadSql');
+      return preload;
+    }
+  } catch {
+    // sessionStorage may be unavailable
+  }
+  return DEFAULT_SQL;
+}
+
 export function EditorPage() {
-  const [sql, setSql] = useState(DEFAULT_SQL);
+  const [sql, setSql] = useState(loadInitialSql);
   const [ddl, setDdl] = useState('');
   const [schema, setSchema] = useState<SchemaDefinition | null>(null);
   const [activeSchemaId, setActiveSchemaId] = useState<string | null>(null);
@@ -186,7 +202,7 @@ export function EditorPage() {
           >
             SafeSQL
           </a>
-          <span style={{ color: '#52525b', fontSize: 11 }}>v0.2.0</span>
+          <span style={{ color: '#52525b', fontSize: 11 }}>v0.3.0</span>
           {appUser && (
             <UsageMeter
               count={appUser.validations_this_month}

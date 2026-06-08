@@ -1,7 +1,7 @@
 {
   "name": "safesql",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,7 @@
     "@stripe/stripe-js": "^9.4.0",
     "@supabase/supabase-js": "^2.105.1",
     "lucide-react": "^1.14.0",
+    "nanoid": "^5.1.11",
     "node-sql-parser": "^5.4.0",
     "react": "^19.2.5",
     "react-dom": "^19.2.5"

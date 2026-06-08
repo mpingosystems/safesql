@@ -1,0 +1,5 @@
+# SPA fallback for the short-URL permalink path (/v/{id}). Real files (assets,
+# favicon) are served first; /api/* is handled by Pages Functions via
+# _routes.json. Only unmatched /v/* paths fall through to index.html so the
+# React app can read the id and fetch the shared validation.
+/v/*  /index.html  200

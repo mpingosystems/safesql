@@ -141,28 +141,48 @@ function generateValue(
   }
 
   // 4. Semantic recognition by column-name substring (the realistic-data path).
+  void isIntType; // (kept above for readability; typeFallbackValue recomputes)
   const semantic = semanticValue(name, type, rng);
   if (semantic !== undefined) return semantic;
 
   // 5. Type-based fallback.
-  if (type === 'UUID') return crypto.randomUUID();
-  if (isIntType) return rng.int(1, 100_000);
+  return typeFallbackValue(col.name, type, rng);
+}
+
+// Type-driven value for columns no semantic rule recognised. Used by both the
+// main generator and the sampleColumnValue() test/preview helper.
+function typeFallbackValue(originalName: string, type: string, rng: Rng): unknown {
+  const t = String(type ?? '').toUpperCase();
+  if (t === 'UUID') return crypto.randomUUID();
+  if (t.includes('SERIAL') || t === 'INT' || t === 'INTEGER' || t === 'BIGINT' || t === 'SMALLINT') {
+    return rng.int(1, 100_000);
+  }
   if (
-    type === 'NUMERIC' ||
-    type === 'DECIMAL' ||
-    type === 'REAL' ||
-    type === 'DOUBLE' ||
-    type.includes('DOUBLE') ||
-    type === 'FLOAT' ||
-    type.startsWith('NUMERIC')
+    t === 'NUMERIC' ||
+    t === 'DECIMAL' ||
+    t === 'REAL' ||
+    t === 'DOUBLE' ||
+    t.includes('DOUBLE') ||
+    t === 'FLOAT' ||
+    t.startsWith('NUMERIC')
   ) {
     return round2(rng.float(1, 10_000));
   }
-  if (type === 'BOOLEAN' || type === 'BOOL') return rng.int(0, 1) === 1;
-  if (type === 'DATE' || type.includes('TIMESTAMP')) return pastTimestamp(rng);
-
+  if (t === 'BOOLEAN' || t === 'BOOL') return rng.int(0, 1) === 1;
+  if (t === 'DATE' || t.includes('TIMESTAMP')) return pastTimestamp(rng);
   // TEXT / VARCHAR / CHAR / anything else.
-  return `${col.name}_${rng.int(1, 9999)}`;
+  return `${originalName}_${rng.int(1, 9999)}`;
+}
+
+// Test / preview helper: infer ONE realistic value from a column name (+ type).
+// The production path is generateSandboxData(); generateValue() is internal and
+// multi-arg, so this gives a stable single-column surface without changing it.
+export function sampleColumnValue(columnName: string, type = 'text', seed = 1): unknown {
+  const rng = makeRng(seed);
+  const name = columnName.toLowerCase();
+  const upperType = String(type).toUpperCase();
+  const semantic = semanticValue(name, upperType, rng);
+  return semantic !== undefined ? semantic : typeFallbackValue(columnName, upperType, rng);
 }
 
 // Substring-based semantic mapping. Returns undefined when no rule matches so
@@ -184,6 +204,14 @@ function semanticValue(name: string, type: string, rng: Rng): unknown {
     const user = rng.pick(FIRST_NAMES).toLowerCase();
     return `${user}${rng.int(1, 999)}@${rng.pick(DOMAINS)}`;
   }
+  // country_code BEFORE country (country_code contains "country") and BEFORE the
+  // name block (so "country_name" resolves to a country, not a person's name).
+  if (name.includes('country') && (name.includes('code') || name.includes('iso'))) {
+    return rng.pick(COUNTRY_CODES);
+  }
+  if (name.includes('country') || name.includes('nationality')) {
+    return rng.pick(COUNTRIES);
+  }
   // full_name / display_name / name → "First Last" (must contain a space).
   if (name === 'name' || name.includes('full_name') || name.includes('fullname') || name.endsWith('_name')) {
     if (name.includes('first')) return rng.pick(FIRST_NAMES);
@@ -198,9 +226,24 @@ function semanticValue(name: string, type: string, rng: Rng): unknown {
   }
   if (name === 'first_name' || name.includes('firstname')) return rng.pick(FIRST_NAMES);
   if (name === 'last_name' || name.includes('lastname') || name.includes('surname')) return rng.pick(LAST_NAMES);
-  if (name.includes('country')) return rng.pick(COUNTRIES);
-  if (name.includes('city')) return rng.pick(CITIES);
-  if (name.includes('phone')) return `+1${rng.int(2000000000, 9999999999)}`;
+  if (name.includes('city') || name.includes('town')) return rng.pick(CITIES);
+  if (name.includes('street') || name.includes('address')) {
+    return `${rng.int(1, 9999)} ${rng.pick(STREET_NAMES)} ${rng.pick(STREET_TYPES)}`;
+  }
+  if (name.includes('zip') || name.includes('postal')) {
+    return String(rng.int(10000, 99999));
+  }
+  if (
+    name.includes('company') ||
+    name.includes('vendor') ||
+    name.includes('employer') ||
+    name.includes('organization')
+  ) {
+    return `${rng.pick(LAST_NAMES)} ${rng.pick(COMPANY_SUFFIX)}`;
+  }
+  if (name.includes('phone') || name.includes('mobile') || name === 'tel') {
+    return `+1${rng.int(2000000000, 9999999999)}`;
+  }
   if (name === 'status' || name.endsWith('_status') || name.includes('state')) {
     return rng.pick(STATUSES);
   }
@@ -238,13 +281,36 @@ function pickWeightedEnum<T>(values: readonly T[], rng: Rng): T {
 }
 
 // ── Sample pools ─────────────────────────────────────────────────────────────
-const FIRST_NAMES = ['Alice', 'Bob', 'Carol', 'David', 'Eve', 'Frank', 'Grace', 'Heidi', 'Ivan', 'Judy'];
-const LAST_NAMES = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Lopez', 'Wilson'];
-const DOMAINS = ['example.com', 'mail.io', 'corp.dev', 'acme.co', 'test.net'];
-const STATUSES = ['active', 'pending', 'completed', 'cancelled', 'inactive'];
-const COUNTRIES = ['US', 'UK', 'CA', 'DE', 'FR', 'JP', 'BR', 'IN'];
-const CITIES = ['Austin', 'London', 'Toronto', 'Berlin', 'Paris', 'Tokyo'];
-const COMPANY_SUFFIX = ['Inc', 'LLC', 'Group', 'Co', 'Labs'];
+const FIRST_NAMES: readonly string[] = [
+  'Alice', 'Bob', 'Carlos', 'Diana', 'Edward', 'Fatima', 'George', 'Hannah', 'Ivan', 'Julia',
+  'Kevin', 'Laura', 'Miguel', 'Nina', 'Oscar', 'Patricia', 'Quinn', 'Rachel', 'Samuel', 'Tanya',
+  'Uma', 'Victor', 'Wendy', 'Xavier', 'Yara', 'Zachary',
+];
+const LAST_NAMES: readonly string[] = [
+  'Johnson', 'Smith', 'Garcia', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Wilson', 'Taylor',
+  'Anderson', 'Thomas', 'Jackson', 'White', 'Harris', 'Martin', 'Thompson', 'Young', 'Lewis',
+];
+const DOMAINS: readonly string[] = ['example.com', 'mail.io', 'corp.dev', 'acme.co', 'test.net'];
+const STATUSES: readonly string[] = ['active', 'pending', 'completed', 'cancelled', 'inactive'];
+// Full country names (was 2-letter codes — that's what COUNTRY_CODES is for).
+const COUNTRIES: readonly string[] = [
+  'United States', 'United Kingdom', 'Germany', 'France', 'Japan', 'Brazil', 'Canada', 'Australia',
+  'India', 'Mexico', 'South Korea', 'Netherlands', 'Sweden', 'Norway', 'Denmark', 'Switzerland',
+  'Singapore', 'New Zealand', 'South Africa', 'Nigeria', 'Kenya', 'Argentina', 'Chile', 'Colombia',
+  'Turkey', 'Poland', 'Czech Republic', 'Portugal', 'Spain', 'Italy', 'Greece', 'Egypt', 'Morocco',
+];
+const COUNTRY_CODES: readonly string[] = [
+  'US', 'GB', 'DE', 'FR', 'JP', 'BR', 'CA', 'AU', 'IN', 'MX', 'KR', 'NL', 'SE', 'NO', 'DK', 'CH',
+  'SG', 'NZ', 'ZA', 'NG', 'KE', 'AR', 'CL', 'CO', 'TR', 'PL', 'CZ', 'PT', 'ES', 'IT', 'GR', 'EG', 'MA',
+];
+const CITIES: readonly string[] = [
+  'Austin', 'London', 'Toronto', 'Berlin', 'Paris', 'Tokyo', 'Madrid', 'Lagos', 'Mumbai', 'Sydney',
+];
+const STREET_NAMES: readonly string[] = [
+  'Oak', 'Maple', 'Cedar', 'Pine', 'Elm', 'Washington', 'Lincoln', 'Park', 'Lake', 'Hill',
+];
+const STREET_TYPES: readonly string[] = ['St', 'Ave', 'Blvd', 'Rd', 'Ln', 'Dr'];
+const COMPANY_SUFFIX: readonly string[] = ['Inc', 'LLC', 'Group', 'Co', 'Labs'];
 
 // ── RNG ──────────────────────────────────────────────────────────────────────
 interface Rng {

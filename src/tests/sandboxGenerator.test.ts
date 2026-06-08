@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { generateSandboxData, topologicalSort } from '../services/sandboxGenerator';
+import {
+  generateSandboxData,
+  sampleColumnValue,
+  topologicalSort,
+} from '../services/sandboxGenerator';
 import { parseDDL } from '../services/schemaParser';
 
 const DDL = `
@@ -166,5 +170,61 @@ describe('topologicalSort', () => {
     const order = topologicalSort(schema.tables).map((t) => t.name);
     expect(order.indexOf('users')).toBeLessThan(order.indexOf('orders'));
     expect(order.indexOf('orders')).toBeLessThan(order.indexOf('order_items'));
+  });
+});
+
+// Semantic column inference (sampleColumnValue) — guards BUG 1 (full_name) and
+// BUG 2 (country) plus the audit fixes (company / address / zip / country_code).
+const PLACEHOLDER = /^[a-z_]+_\d{3,}$/;
+
+describe('semantic column inference', () => {
+  it('full_name → realistic "First Last", never a placeholder', () => {
+    for (let s = 1; s <= 20; s++) {
+      const r = String(sampleColumnValue('full_name', 'text', s));
+      expect(r).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+$/);
+      expect(r).not.toContain('full_name_');
+      expect(r).not.toContain('_');
+    }
+  });
+
+  it('name → realistic value, never a placeholder', () => {
+    const r = String(sampleColumnValue('name', 'text', 3));
+    expect(r).not.toContain('name_');
+    expect(r).not.toMatch(PLACEHOLDER);
+  });
+
+  it('country → full country name, never a placeholder or 2-letter code', () => {
+    for (let s = 1; s <= 20; s++) {
+      const r = String(sampleColumnValue('country', 'text', s));
+      expect(r).not.toContain('country_');
+      expect(r.length).toBeGreaterThan(2);
+      expect(r).not.toMatch(/^[A-Z]{2}$/);
+    }
+  });
+
+  it('country_code → 2-3 letter ISO code', () => {
+    const r = String(sampleColumnValue('country_code', 'text', 5));
+    expect(r).toMatch(/^[A-Z]{2,3}$/);
+  });
+
+  it('email → valid email format', () => {
+    const r = String(sampleColumnValue('email', 'text', 7));
+    expect(r).toMatch(/^[^@]+@[^@]+\.[^@]+$/);
+  });
+
+  it('company / address / zip no longer emit placeholders', () => {
+    expect(String(sampleColumnValue('company', 'text', 2))).not.toMatch(PLACEHOLDER);
+    expect(String(sampleColumnValue('address', 'text', 2))).not.toMatch(PLACEHOLDER);
+    expect(String(sampleColumnValue('zip', 'text', 2))).toMatch(/^\d{5}$/);
+    expect(String(sampleColumnValue('postal_code', 'text', 2))).toMatch(/^\d{5}$/);
+  });
+
+  it('no common column generates a placeholder string', () => {
+    const cols = ['full_name', 'country', 'country_code', 'email', 'phone', 'city',
+      'first_name', 'last_name', 'company', 'address', 'zip'];
+    for (const col of cols) {
+      const r = String(sampleColumnValue(col, 'text', 11));
+      expect(r).not.toMatch(PLACEHOLDER);
+    }
   });
 });

@@ -33,7 +33,7 @@ export interface CreateSharedInput {
 }
 
 // The short, Slack-shareable URL. Always built on the canonical domain so links
-// shared from any deployment point at safesql.dev.
+// shared from any deployment point at safesqlpro.dev.
 export function buildShortUrl(id: string): string {
   return `${SITE_URL}/v/${id}`;
 }

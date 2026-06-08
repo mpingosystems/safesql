@@ -7,7 +7,7 @@ export interface Env {
   STRIPE_WEBHOOK_SECRET: string;
 
   // Public URL of the deployed site, used for Stripe success/cancel URLs.
-  // Defaults to https://safesql.dev when unset.
+  // Defaults to https://safesqlpro.dev when unset.
   SITE_URL?: string;
 
   // Supabase — service-role key bypasses RLS (only for trusted server code).
@@ -38,5 +38,5 @@ export function methodNotAllowed(allowed: string[]): Response {
 }
 
 export function siteUrl(env: Env): string {
-  return (env.SITE_URL || 'https://safesql.dev').replace(/\/+$/, '');
+  return (env.SITE_URL || 'https://safesqlpro.dev').replace(/\/+$/, '');
 }

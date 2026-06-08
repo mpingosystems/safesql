@@ -35,6 +35,23 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   try {
     ast = parser.astify(request.sql, { database: request.dialect });
   } catch (e) {
+    // A parse failure is often caused by a foreign-dialect construct that the
+    // selected dialect can't parse (MySQL `LIMIT a,b`, SQL Server `TOP n`). If
+    // we recognise one, surface THAT as the explanation (a 41-69 dialect
+    // warning) rather than an opaque syntax error scored 0.
+    const dialectIssues = detectDialectLimitTop(request.sql, request.dialect);
+    if (dialectIssues.length > 0) {
+      for (const issue of dialectIssues) normalizeIssueContract(issue);
+      return {
+        riskScore: calculateRiskScore(dialectIssues),
+        executionSafe: dialectIssues.every((i) => i.severity !== 'error'),
+        errors: dialectIssues.filter((i) => i.severity === 'error'),
+        warnings: dialectIssues.filter((i) => i.severity === 'warning'),
+        suggestions: dialectIssues.filter((i) => i.severity === 'suggestion'),
+        processingMs: performance.now() - start,
+        source: request.source,
+      };
+    }
     return {
       riskScore: 0,
       executionSafe: false,
@@ -84,6 +101,13 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   issues.push(...detectDialectMismatch(request.sql, request.dialect));
   issues.push(...detectNonDeterministicWindow(ast));
 
+  // ── Sprint 3b additions ─────────────────────────────────────────────────────
+  issues.push(...detectCoalesceInJoinKey(ast));
+  issues.push(...detectWindowMissingOrder(ast));
+  issues.push(...detectMissingTimeFilterBareScan(ast));
+  issues.push(...detectImplicitTimezone(ast));
+  issues.push(...detectDialectLimitTop(request.sql, request.dialect));
+
   // Issue Object Contract (§10): make sure every finding carries the offending
   // anchor fields + a scoreImpact, deriving them from legacy `metadata`/severity
   // when a detector didn't set them explicitly.
@@ -106,6 +130,12 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
 
 // High-risk warnings land in the 41-69 band; everything else warning-level is a
 // "medium" warning in the 70-84 band. This is the §11 Score Policy made concrete.
+//
+// Sprint 3b decision: AGGREGATE_OVER_FANOUT_JOIN (and NOT_IN_NULLABLE) stay
+// WARNINGS in the 41-69 band. The Sprint 3 prompt's §3 prose called fan-out an
+// "error <50", but the SAME prompt's §11 score-policy table classifies fan-out
+// as a high-risk *warning* (41-69) — and that policy is the one that shipped and
+// is tested. The table wins; fan-out remains a high-risk warning (scores ~60).
 const HIGH_RISK_WARNINGS = new Set<DetectorId>([
   'LEFT_JOIN_FILTERED_IN_WHERE',
   'SUSPICIOUS_JOIN_KEY',
@@ -116,6 +146,9 @@ const HIGH_RISK_WARNINGS = new Set<DetectorId>([
   'MISSING_TIME_FILTER',
   'DIALECT_MISMATCH',
   'AMBIGUOUS_COLUMN',
+  // Sprint 3b additions:
+  'COALESCE_IN_JOIN_KEY',
+  'WINDOW_MISSING_ORDER',
 ]);
 
 // §11 Score Policy. Tier of the WORST finding sets the band; additional findings
@@ -1711,5 +1744,232 @@ function detectHavingWithoutGroupBy(ast: any): ValidationIssue[] {
       metadata: {},
     });
   }
+  return issues;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Sprint 3b detectors (additive — see task brief)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Extract a function name from a node-sql-parser function/aggr node.
+function getFunctionName(node: any): string | null {
+  if (!node || typeof node !== 'object') return null;
+  if (node.type !== 'function' && node.type !== 'aggr_func') return null;
+  const n = node.name;
+  if (typeof n === 'string') return n;
+  if (n && Array.isArray(n.name) && n.name[0]) {
+    const first = n.name[0];
+    return typeof first === 'string' ? first : (first.value ?? null);
+  }
+  return null;
+}
+
+// Walk an arbitrary AST subtree looking for a function call by name. Stops at
+// nested SELECTs (their own scope).
+function containsFunction(node: any, fnLower: string): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'select') return false;
+  if (getFunctionName(node)?.toLowerCase() === fnLower) return true;
+  for (const key of Object.keys(node)) {
+    const v = (node as any)[key];
+    if (Array.isArray(v)) {
+      for (const item of v) if (containsFunction(item, fnLower)) return true;
+    } else if (v && typeof v === 'object') {
+      if (containsFunction(v, fnLower)) return true;
+    }
+  }
+  return false;
+}
+
+// ── COALESCE_IN_JOIN_KEY (no schema) ─────────────────────────────────────────
+// COALESCE() wrapping a join-key column defeats index use and can match
+// unrelated rows (e.g. COALESCE(o.user_id, 0) = u.id matches u.id = 0).
+function detectCoalesceInJoinKey(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from)) continue;
+    const seen = new Set<string>();
+    for (const f of stmt.from) {
+      if (!f?.join || !f.on) continue;
+      if (!containsFunction(f.on, 'coalesce')) continue;
+      const tbl = typeof f.table === 'string' ? f.table : f.as;
+      if (seen.has(String(tbl))) continue;
+      seen.add(String(tbl));
+      issues.push({
+        id: 'COALESCE_IN_JOIN_KEY',
+        severity: 'warning',
+        title: `COALESCE in the JOIN key for "${tbl}"`,
+        description: `Wrapping a join key in COALESCE() prevents index use and can match unrelated rows (a COALESCE default may equal a real key on the other side).`,
+        fix: `COALESCE in join key prevents index use and may match unrelated rows. Use an IS NOT NULL filter instead.`,
+        offendingClause: 'JOIN',
+        offendingTable: typeof tbl === 'string' ? tbl : undefined,
+        metadata: { joinTable: tbl },
+      });
+    }
+  }
+  return issues;
+}
+
+// ── WINDOW_MISSING_ORDER (no schema) ─────────────────────────────────────────
+// A ranking window function with NO ORDER BY at all produces non-deterministic
+// row numbers. (Complements NON_DETERMINISTIC_WINDOW_ORDER, which fires when an
+// ORDER BY exists but has a single, possibly non-unique, key.)
+function detectWindowMissingOrder(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const seen = new Set<string>();
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'window_func' && node.over) {
+      const fn = String(node.name ?? '').toLowerCase();
+      if (RANKING_WINDOW_FUNCS.has(fn)) {
+        const ob = findWindowOrderBy(node.over);
+        if ((!ob || ob.length === 0) && !seen.has(fn)) {
+          seen.add(fn);
+          issues.push({
+            id: 'WINDOW_MISSING_ORDER',
+            severity: 'warning',
+            title: `${fn.toUpperCase()}() has no ORDER BY`,
+            description: `${fn.toUpperCase()}() without an ORDER BY assigns row numbers in an arbitrary, non-deterministic order that can change between runs.`,
+            fix: `${fn.toUpperCase()}() without ORDER BY produces non-deterministic row numbers. Add ORDER BY created_at DESC (or another meaningful key).`,
+            offendingClause: 'SELECT',
+            metadata: { windowFunc: fn },
+          });
+        }
+      }
+    }
+    for (const key of Object.keys(node)) {
+      const v = (node as any)[key];
+      if (Array.isArray(v)) for (const item of v) visit(item);
+      else if (v && typeof v === 'object') visit(v);
+    }
+  };
+  for (const stmt of asStatements(ast)) visit(stmt);
+  return issues;
+}
+
+// ── MISSING_TIME_FILTER — bare scan of an event/log table (no schema) ────────
+// A full scan of an append-only event/log table with no date filter is almost
+// always a mistake. Scoped to event-like table NAMES and to NON-aggregate
+// queries, so it never overlaps the existing aggregate-based MISSING_TIME_FILTER.
+const EVENT_TABLE_RE =
+  /^(events?|logs?|audit_log|audit_logs|audit|activity|activities|sessions?|page_?views?|clicks?|impressions?|telemetry|event_log|access_log)$/i;
+
+function detectMissingTimeFilterBareScan(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from) || stmt.from.length !== 1) continue;
+    const f = stmt.from[0];
+    if (typeof f?.table !== 'string' || !EVENT_TABLE_RE.test(f.table)) continue;
+    // Skip aggregate queries — those are the existing detector's territory.
+    if (hasAggregateFunction(stmt.columns)) continue;
+    // Already has a date predicate in WHERE? Then it's filtered — don't flag.
+    let hasDatePred = false;
+    if (stmt.where) {
+      walkColumnRefs(stmt.where, (n: any) => {
+        const c = getColumnName(n);
+        if (c && DATE_NAME_RE.test(c)) hasDatePred = true;
+      });
+    }
+    if (hasDatePred) continue;
+    issues.push({
+      id: 'MISSING_TIME_FILTER',
+      severity: 'warning',
+      title: `No time filter on "${f.table}"`,
+      description: `"${f.table}" looks like an append-only event/log table. Scanning it without a date filter reads the entire history and gets slower over time.`,
+      fix: `Query has no time filter. Add WHERE created_at >= NOW() - INTERVAL '30 days' to limit the scan range.`,
+      offendingClause: stmt.where ? 'WHERE' : 'FROM',
+      offendingTable: f.table,
+      metadata: { table: f.table, reason: 'bare_scan' },
+    });
+  }
+  return issues;
+}
+
+// ── IMPLICIT_TIMEZONE (no schema) ────────────────────────────────────────────
+// Comparing a date/time column to a naive timestamp string literal (no Z / no
+// offset) can behave differently across server timezones.
+const NAIVE_DATE_RE = /^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?)?$/;
+const HAS_TZ_RE = /[zZ]$|[+-]\d{2}:?\d{2}$/;
+
+function isNaiveDateString(node: any): boolean {
+  if (!node) return false;
+  const isStr = node.type === 'single_quote_string' || node.type === 'string';
+  if (!isStr || typeof node.value !== 'string') return false;
+  return NAIVE_DATE_RE.test(node.value) && !HAS_TZ_RE.test(node.value);
+}
+
+const TZ_COMPARE_OPS = new Set(['>', '<', '>=', '<=', '=', '!=', '<>']);
+
+function detectImplicitTimezone(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (!stmt) continue;
+    const seen = new Set<string>();
+    const visit = (node: any) => {
+      if (node?.type !== 'binary_expr') return;
+      const op = String(node.operator ?? '').toUpperCase();
+      if (!TZ_COMPARE_OPS.has(op)) return;
+      const sides = [node.left, node.right];
+      const colNode = sides.find((s) => s?.type === 'column_ref');
+      const litNode = sides.find((s) => isNaiveDateString(s));
+      if (!colNode || !litNode) return;
+      const col = getColumnName(colNode);
+      if (!col || !DATE_NAME_RE.test(col)) return;
+      if (seen.has(col)) return;
+      seen.add(col);
+      issues.push({
+        id: 'IMPLICIT_TIMEZONE',
+        severity: 'suggestion',
+        title: `Timestamp compared to a timezone-naive literal ("${col}")`,
+        description: `Comparing "${col}" to '${litNode.value}' (no timezone) can behave differently across server/session timezones.`,
+        fix: `Timestamp comparison without timezone may behave differently across environments. Use '${litNode.value.slice(0, 10)}T00:00:00Z' or AT TIME ZONE 'UTC'.`,
+        offendingClause: 'WHERE',
+        offendingColumn: col,
+        metadata: { column: col, literal: litNode.value },
+      });
+    };
+    walkPredicates(stmt.where, visit);
+    walkPredicates(stmt.having, visit);
+  }
+  return issues;
+}
+
+// ── DIALECT_MISMATCH — MySQL `LIMIT a,b` + SQL Server `TOP n` (raw text) ──────
+// These constructs FAIL to parse under PostgreSQL/Snowflake/BigQuery, so this
+// runs on the raw SQL (incl. from the parse-failure catch path) rather than the
+// AST. We surface the dialect mismatch as the explanation for the parse failure.
+function detectDialectLimitTop(sql: string, dialect: string): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+
+  // MySQL `LIMIT offset, count` — valid only in MySQL.
+  const limitMatch = /\bLIMIT\s+(\d+)\s*,\s*(\d+)/i.exec(sql);
+  if (limitMatch && dialect !== 'mysql') {
+    const [, offset, count] = limitMatch;
+    issues.push({
+      id: 'DIALECT_MISMATCH',
+      severity: 'warning',
+      title: 'MySQL `LIMIT offset, count` syntax',
+      description: `\`LIMIT ${offset}, ${count}\` is MySQL-specific and will not run in ${dialect}.`,
+      fix: `LIMIT offset,count is MySQL syntax. In PostgreSQL use: LIMIT ${count} OFFSET ${offset}`,
+      offendingClause: 'SELECT',
+      metadata: { construct: 'mysql_limit', dialect },
+    });
+  }
+
+  // SQL Server `SELECT TOP n` — not valid in any of our supported dialects.
+  const topMatch = /\bSELECT\s+(?:DISTINCT\s+)?TOP\s+\(?\s*(\d+)/i.exec(sql);
+  if (topMatch) {
+    const [, n] = topMatch;
+    issues.push({
+      id: 'DIALECT_MISMATCH',
+      severity: 'warning',
+      title: 'SQL Server `TOP` syntax',
+      description: `\`TOP ${n}\` is SQL Server-specific and will not run in ${dialect}.`,
+      fix: `TOP is SQL Server syntax. In PostgreSQL use: LIMIT ${n}`,
+      offendingClause: 'SELECT',
+      metadata: { construct: 'sqlserver_top', dialect },
+    });
+  }
+
   return issues;
 }

@@ -82,6 +82,10 @@ export type DetectorId =
   | 'NON_DETERMINISTIC_WINDOW_ORDER'
   | 'DESTRUCTIVE_DDL'
   | 'DESTRUCTIVE_TRUNCATE'
+  // ── Sprint 3b additions ───────────────────────────────────────────────────
+  | 'COALESCE_IN_JOIN_KEY'
+  | 'IMPLICIT_TIMEZONE'
+  | 'WINDOW_MISSING_ORDER'
   | 'SYNTAX_ERROR';
 
 export interface SchemaDefinition {

@@ -1,0 +1,32 @@
+name: SafeSQL Validate
+description: "Validate SQL files for semantic errors before merge"
+branding:
+  icon: shield
+  color: purple
+inputs:
+  sql_files:
+    description: "Glob pattern for SQL files to validate"
+    required: false
+    default: "**/*.sql"
+  schema_file:
+    description: "Path to DDL schema file (optional)"
+    required: false
+  dialect:
+    description: "SQL dialect: postgresql | mysql | bigquery | snowflake"
+    required: false
+    default: "postgresql"
+  fail_on_warnings:
+    description: "Fail if warnings found (default: only fail on errors)"
+    required: false
+    default: "false"
+  api_key:
+    description: "SafeSQL API key (Pro/Team tier for AI explanations)"
+    required: false
+outputs:
+  issues_found:
+    description: "Number of issues found across all files"
+  files_checked:
+    description: "Number of SQL files checked"
+runs:
+  using: "node20"
+  main: "dist/index.js"

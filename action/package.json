@@ -1,0 +1,18 @@
+{
+  "name": "safesql-action",
+  "version": "0.4.0",
+  "private": true,
+  "description": "SafeSQL GitHub Action — validate SQL files in CI",
+  "scripts": {
+    "build": "ncc build src/index.ts -o dist"
+  },
+  "dependencies": {
+    "@actions/core": "^1.10.1",
+    "@actions/glob": "^0.4.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.1",
+    "typescript": "~6.0.2",
+    "@types/node": "^24.12.2"
+  }
+}

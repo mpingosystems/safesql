@@ -1,5 +1,6 @@
 import type { ValidationReport } from '../types/validation';
 import { getSupabase, isSupabaseConfigured } from './supabaseClient';
+import { writeAuditEvent } from './auditLog';
 
 export interface PersistValidationInput {
   appUserId: string;
@@ -35,6 +36,18 @@ export async function persistValidation(input: PersistValidationInput): Promise<
       console.warn('persistValidation failed', error.message);
       return false;
     }
+    // SOC 2 audit trail (fire-and-forget): record the validation_run event.
+    void writeAuditEvent(
+      'validation_run',
+      {
+        risk_score: input.report.riskScore,
+        issue_types: [...input.report.errors, ...input.report.warnings].map((i) => i.id),
+        sql_hash: sqlHash,
+        dialect: input.dialect ?? 'postgresql',
+      },
+      { user_id: input.appUserId },
+      supabase,
+    );
     return true;
   } catch (e) {
     console.warn('persistValidation threw', e);

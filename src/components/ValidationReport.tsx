@@ -1,18 +1,70 @@
 import { useState } from 'react';
-import type { ValidationReport as Report } from '../types/validation';
+import type {
+  SchemaDefinition,
+  ValidationIssue,
+  ValidationReport as Report,
+} from '../types/validation';
 import { RiskScore } from './RiskScore';
 import { IssueCard } from './IssueCard';
+import { ProofPanel } from './ProofPanel';
+import { buildShareUrl } from '../services/permalink';
 
 interface ValidationReportProps {
   report: Report | null;
   onExecute?: () => void;
   onFixIssues?: () => void;
+  // PQ context — supplied by the editor, omitted in read-only share view.
+  sql?: string;
+  ddl?: string;
+  schema?: SchemaDefinition | null;
+  dialect?: string;
+  isPro?: boolean;
+  onApplyFix?: (issue: ValidationIssue) => void;
 }
+
+const SOURCE_LABELS: Record<string, string> = {
+  cursor: '⚡ Cursor-generated',
+  copilot: '⚡ Copilot-generated',
+  chatgpt: '⚡ ChatGPT-generated',
+  manual: '✍ Hand-written',
+  unknown: 'Source: unknown',
+};
 
 type Tab = 'errors' | 'warnings' | 'suggestions';
 
-export function ValidationReport({ report, onExecute, onFixIssues }: ValidationReportProps) {
+export function ValidationReport({
+  report,
+  onExecute,
+  onFixIssues,
+  sql,
+  ddl,
+  schema,
+  dialect,
+  isPro = false,
+  onApplyFix,
+}: ValidationReportProps) {
   const [tab, setTab] = useState<Tab>('errors');
+  const [copied, setCopied] = useState(false);
+
+  const copyLink = async () => {
+    if (!report || !sql) return;
+    const url = buildShareUrl({
+      v: 1,
+      sql,
+      ddl: ddl || undefined,
+      dialect: dialect ?? 'postgresql',
+      source: report.source,
+      report,
+    });
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      // Clipboard may be blocked; surface the URL via prompt as a fallback.
+      window.prompt('Copy this validation link:', url);
+    }
+  };
 
   if (!report) {
     return (
@@ -47,6 +99,55 @@ export function ValidationReport({ report, onExecute, onFixIssues }: ValidationR
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <RiskScore score={report.riskScore} />
 
+      {/* PQ1 source badge + PQ5 copy-link */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '6px 12px',
+          gap: 8,
+        }}
+      >
+        {report.source ? (
+          <span
+            style={{
+              fontSize: 10.5,
+              fontWeight: 700,
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: report.source === 'manual' ? '#27272a' : '#78350f',
+              color: report.source === 'manual' ? '#a1a1aa' : '#fde68a',
+            }}
+          >
+            {SOURCE_LABELS[report.source] ?? report.source}
+          </span>
+        ) : (
+          <span />
+        )}
+        {sql && (
+          <button
+            type="button"
+            onClick={() => void copyLink()}
+            title="Copy a shareable link to this validation"
+            style={{
+              background: 'transparent',
+              border: '1px solid #27272a',
+              borderRadius: 5,
+              color: copied ? '#22c55e' : '#a1a1aa',
+              fontSize: 11,
+              padding: '3px 8px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+            }}
+          >
+            {copied ? '✓ Copied' : '🔗 Copy link'}
+          </button>
+        )}
+      </div>
+
       <div
         role="tablist"
         style={{
@@ -66,9 +167,19 @@ export function ValidationReport({ report, onExecute, onFixIssues }: ValidationR
             No {tab}.
           </div>
         ) : (
-          issues.map((issue, idx) => <IssueCard key={`${issue.id}-${idx}`} issue={issue} />)
+          issues.map((issue, idx) => (
+            <IssueCard
+              key={`${issue.id}-${idx}`}
+              issue={issue}
+              isPro={isPro}
+              onApplyFix={onApplyFix}
+            />
+          ))
         )}
       </div>
+
+      {/* PQ2 — synthetic proof renders only when a fan-out/grain issue exists */}
+      <ProofPanel report={report} sql={sql ?? ''} ddl={ddl ?? ''} schema={schema ?? null} />
 
       <div style={{ padding: 12, borderTop: '1px solid #27272a' }}>
         {report.errors.length > 0 ? (

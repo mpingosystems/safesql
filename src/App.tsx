@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { LandingPage } from './pages/Landing';
 import { EditorPage } from './pages/Editor';
+import { ShareViewPage } from './pages/ShareView';
 
-type Route = 'landing' | 'editor' | 'pricing';
+type Route = 'landing' | 'editor' | 'pricing' | 'share';
 
 function routeFromHash(): Route {
   const h = window.location.hash.replace(/^#/, '').replace(/\?.*$/, '');
   if (h.startsWith('/editor')) return 'editor';
   if (h.startsWith('/pricing')) return 'pricing';
+  if (h.startsWith('/v/')) return 'share';
   return 'landing';
 }
 
@@ -25,6 +27,8 @@ function App() {
       return <EditorPage />;
     case 'pricing':
       return <PricingStub />;
+    case 'share':
+      return <ShareViewPage />;
     default:
       return <LandingPage />;
   }

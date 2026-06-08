@@ -49,6 +49,7 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
       warnings: [],
       suggestions: [],
       processingMs: performance.now() - start,
+      source: request.source,
     };
   }
 
@@ -97,6 +98,7 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
     warnings,
     suggestions,
     processingMs: performance.now() - start,
+    source: request.source,
   };
 }
 

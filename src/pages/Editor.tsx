@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { SchemaDefinition, ValidationReport as Report } from '../types/validation';
+import type {
+  SchemaDefinition,
+  SqlSource,
+  ValidationIssue,
+  ValidationReport as Report,
+} from '../types/validation';
 import { SqlEditor } from '../components/SqlEditor';
 import { SchemaPanel } from '../components/SchemaPanel';
 import { ValidationReport } from '../components/ValidationReport';
@@ -8,6 +13,7 @@ import { UpgradeBanner } from '../components/UpgradeBanner';
 import { validateSQL } from '../services/sqlValidator';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
 import { persistValidation } from '../services/persistValidation';
+import { applyFix } from '../services/applyFix';
 import { AuthControls } from '../components/AuthControls';
 import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
 
@@ -51,12 +57,14 @@ export function EditorPage() {
     }
   }, [dialect]);
   const [aiEnabled, setAiEnabled] = useState(false);
+  const [source, setSource] = useState<SqlSource>('manual');
   const [report, setReport] = useState<Report | null>(null);
   const [lastValidatedAt, setLastValidatedAt] = useState<Date | null>(null);
   const [clearSignal, setClearSignal] = useState(0);
 
   const { appUser, refresh: refreshAppUser } = useAppUser();
   const overLimit = isOverValidationLimit(appUser);
+  const isPro = !!appUser && appUser.plan !== 'free';
 
   const runValidation = useCallback(async () => {
     if (overLimit) return; // hard block when free-tier limit reached
@@ -65,7 +73,7 @@ export function EditorPage() {
     // briefly show last validation's errors against this validation's SQL.
     setReport(null);
 
-    let next = validateSQL({ sql, schema: schema ?? undefined, dialect });
+    let next = validateSQL({ sql, schema: schema ?? undefined, dialect, source });
     setReport(next);
     setLastValidatedAt(new Date());
 
@@ -87,7 +95,31 @@ export function EditorPage() {
         if (ok) void refreshAppUser(); // pull updated count
       });
     }
-  }, [sql, schema, dialect, aiEnabled, appUser, activeSchemaId, refreshAppUser, overLimit]);
+  }, [sql, schema, dialect, source, aiEnabled, appUser, activeSchemaId, refreshAppUser, overLimit]);
+
+  // PQ4 — apply a mechanical fix, rewrite the editor, and re-validate.
+  const handleApplyFix = useCallback(
+    (issue: ValidationIssue) => {
+      const next = applyFix(sql, issue);
+      if (!next || next === sql) return;
+      setSql(next);
+      const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source });
+      setReport(nextReport);
+      setLastValidatedAt(new Date());
+      if (appUser?.id && !overLimit) {
+        void persistValidation({
+          appUserId: appUser.id,
+          sql: next,
+          report: nextReport,
+          schemaId: activeSchemaId ?? undefined,
+          dialect,
+        }).then((ok) => {
+          if (ok) void refreshAppUser();
+        });
+      }
+    },
+    [sql, schema, dialect, source, appUser, overLimit, activeSchemaId, refreshAppUser],
+  );
 
   const handleValidationFromEditor = (next: Report) => {
     setReport(next);
@@ -263,6 +295,28 @@ export function EditorPage() {
               <option value="snowflake">Snowflake</option>
             </select>
           </label>
+          <label style={{ fontSize: 12, color: '#a1a1aa' }}>
+            Source:{' '}
+            <select
+              value={source}
+              onChange={(e) => setSource(e.target.value as SqlSource)}
+              title="Tag where this SQL came from (PQ1 — tracks AI vs human quality)"
+              style={{
+                background: '#18181b',
+                color: '#e4e4e7',
+                border: '1px solid #27272a',
+                padding: '4px 8px',
+                borderRadius: 4,
+                fontSize: 12,
+              }}
+            >
+              <option value="manual">Hand-written</option>
+              <option value="cursor">Cursor</option>
+              <option value="copilot">Copilot</option>
+              <option value="chatgpt">ChatGPT</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </label>
           <span style={{ color: '#52525b', fontSize: 11, marginLeft: 'auto' }}>
             Ctrl+S to validate
           </span>
@@ -275,6 +329,7 @@ export function EditorPage() {
             onValidateStart={() => setReport(null)}
             schema={schema ?? undefined}
             dialect={dialect}
+            source={source}
             aiEnabled={aiEnabled}
             clearSignal={clearSignal}
           />
@@ -290,7 +345,15 @@ export function EditorPage() {
           flexDirection: 'column',
         }}
       >
-        <ValidationReport report={report} />
+        <ValidationReport
+          report={report}
+          sql={sql}
+          ddl={ddl}
+          schema={schema}
+          dialect={dialect}
+          isPro={isPro}
+          onApplyFix={handleApplyFix}
+        />
       </aside>
 
       <section

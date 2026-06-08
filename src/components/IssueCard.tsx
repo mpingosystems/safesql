@@ -1,7 +1,10 @@
 import type { ValidationIssue } from '../types/validation';
+import { canApplyFix } from '../services/applyFix';
 
 interface IssueCardProps {
   issue: ValidationIssue;
+  isPro?: boolean;
+  onApplyFix?: (issue: ValidationIssue) => void;
 }
 
 const BADGE_STYLES: Record<ValidationIssue['severity'], { bg: string; fg: string; label: string }> = {
@@ -10,8 +13,9 @@ const BADGE_STYLES: Record<ValidationIssue['severity'], { bg: string; fg: string
   suggestion: { bg: '#1e3a8a', fg: '#bfdbfe', label: 'SUGGESTION' },
 };
 
-export function IssueCard({ issue }: IssueCardProps) {
+export function IssueCard({ issue, isPro = false, onApplyFix }: IssueCardProps) {
   const badge = BADGE_STYLES[issue.severity];
+  const fixable = canApplyFix(issue);
 
   return (
     <div
@@ -75,6 +79,49 @@ export function IssueCard({ issue }: IssueCardProps) {
         >
           {issue.fix}
         </pre>
+      )}
+
+      {/* PQ4 — one-click apply fix. Pro-only; shown blurred with an upgrade
+          nudge on Free, and only when a mechanical rewrite is available. */}
+      {fixable && (
+        <div style={{ marginTop: 8, position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => isPro && onApplyFix?.(issue)}
+            disabled={!isPro}
+            title={isPro ? 'Rewrite the query and re-validate' : 'Apply fix is a Pro feature'}
+            style={{
+              background: '#16a34a',
+              color: 'white',
+              border: 'none',
+              borderRadius: 5,
+              padding: '5px 12px',
+              fontSize: 11.5,
+              fontWeight: 700,
+              cursor: isPro ? 'pointer' : 'not-allowed',
+              filter: isPro ? 'none' : 'blur(0.6px)',
+              opacity: isPro ? 1 : 0.55,
+              width: '100%',
+            }}
+          >
+            {isPro ? '⚡ Apply fix & re-validate' : '🔒 Apply fix (Pro)'}
+          </button>
+          {!isPro && (
+            <a
+              href="#/pricing"
+              style={{
+                display: 'block',
+                textAlign: 'center',
+                fontSize: 10.5,
+                color: '#a78bfa',
+                marginTop: 4,
+                textDecoration: 'none',
+              }}
+            >
+              Upgrade to apply fixes in one click →
+            </a>
+          )}
+        </div>
       )}
     </div>
   );

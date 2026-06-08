@@ -18,6 +18,9 @@ export interface ValidationReport {
   suggestions: ValidationIssue[];
   estimatedRows?: number;
   processingMs: number;
+  // PQ1 — carried through from the request so the source badge displays and the
+  // tag persists inside the stored report JSON (no extra DB column required).
+  source?: SqlSource;
 }
 
 export interface ValidationIssue {

@@ -72,10 +72,10 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
 
   // ── D1–D12 (Sprint 1-2) ────────────────────────────────────────────────────
   issues.push(...detectMissingWhereDestructive(ast));
-  issues.push(...detectIncompleteGroupBy(ast));
+  issues.push(...detectIncompleteGroupBy(ast, request.dialect));
   issues.push(...detectContradictoryFilter(ast));
   issues.push(...detectJoinMultiplication(ast, request.schema));
-  issues.push(...detectSelectStar(ast, request.schema));
+  issues.push(...detectSelectStar(ast, request.schema, request.dialect));
   issues.push(...detectInnerJoinNullExclusion(ast, request.schema));
   issues.push(...detectAggregationGrainMismatch(ast, request.schema));
   issues.push(...detectHallucinatedTable(ast, request.schema));
@@ -241,8 +241,13 @@ function detectMissingWhereDestructive(ast: any): ValidationIssue[] {
 }
 
 // ── D3: Incomplete GROUP BY (no schema needed) ──────────────────────────────
-function detectIncompleteGroupBy(ast: any): ValidationIssue[] {
+function detectIncompleteGroupBy(ast: any, dialect?: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  // Dialect note: MySQL permits this (returns a non-deterministic value per group).
+  const mysqlNote =
+    dialect === 'mysql'
+      ? ' Note: MySQL allows this but returns non-deterministic values — explicitly GROUP BY all non-aggregated columns for portable SQL.'
+      : '';
 
   for (const stmt of asStatements(ast)) {
     if (stmt?.type !== 'select') continue;
@@ -269,7 +274,7 @@ function detectIncompleteGroupBy(ast: any): ValidationIssue[] {
         severity: 'error',
         title: 'Non-aggregated columns not in GROUP BY',
         description: `Column(s) [${missing.join(', ')}] appear in SELECT but not in GROUP BY. This is invalid SQL in strict mode.`,
-        fix: `Add to GROUP BY: GROUP BY ${[...groupByCols, ...missing].join(', ')}`,
+        fix: `Add to GROUP BY: GROUP BY ${[...groupByCols, ...missing].join(', ')}.${mysqlNote}`,
       });
     }
   }
@@ -382,8 +387,9 @@ function isOneToManyRelationship(joinTableName: string | undefined, schema: Sche
 // ── D5: SELECT * on expensive tables (schema optional) ──────────────────────
 const COLUMNAR_HINTS = ['transactions', 'events', 'logs', 'audit', 'pageviews', 'clicks'];
 
-function detectSelectStar(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+function detectSelectStar(ast: any, schema?: SchemaDefinition, dialect?: string): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const isBigQuery = dialect === 'bigquery';
 
   for (const stmt of asStatements(ast)) {
     if (stmt?.type !== 'select') continue;
@@ -400,22 +406,27 @@ function detectSelectStar(ast: any, schema?: SchemaDefinition): ValidationIssue[
       const isLarge = !!(schemaTable?.estimatedRows && schemaTable.estimatedRows > 1_000_000);
       const lower = tableName.toLowerCase();
       const isColumnar = COLUMNAR_HINTS.some((name) => lower.includes(name));
+      const bqCost = isBigQuery
+        ? ' In BigQuery, SELECT * scans all columns and increases query cost proportionally.'
+        : '';
 
       if (isLarge || isColumnar) {
         issues.push({
           id: 'SELECT_STAR_EXPENSIVE',
           severity: 'warning',
           title: `SELECT * on potentially large table "${tableName}"`,
-          description: `SELECT * scans all columns. On large tables this causes high I/O and cost on columnar stores (BigQuery, Snowflake, Redshift).`,
+          description: `SELECT * scans all columns. On large tables this causes high I/O and cost on columnar stores (BigQuery, Snowflake, Redshift).${bqCost}`,
           fix: `Specify only needed columns: SELECT id, name, status FROM ${tableName}`,
           metadata: { tableName },
         });
       } else {
+        // BigQuery bills by bytes scanned, so SELECT * is a direct cost
+        // multiplier there — upgrade from suggestion to warning.
         issues.push({
           id: 'SELECT_STAR_EXPENSIVE',
-          severity: 'suggestion',
+          severity: isBigQuery ? 'warning' : 'suggestion',
           title: `SELECT * on "${tableName}"`,
-          description: `SELECT * retrieves all columns including those you may not need.`,
+          description: `SELECT * retrieves all columns including those you may not need.${bqCost}`,
           fix: `Consider specifying columns explicitly for better performance and clarity.`,
           metadata: { tableName },
         });
@@ -864,7 +875,7 @@ function detectNullEqualityComparison(ast: any): ValidationIssue[] {
         description:
           `Per ANSI SQL, comparing a value to NULL with "${op}" always evaluates to UNKNOWN, never TRUE. ` +
           `This predicate silently excludes every row, which is almost never the intended behavior.`,
-        fix: `Use ${replacement}: WHERE ${col} ${replacement}`,
+        fix: `Use ${replacement}: WHERE ${col} ${replacement}. This applies in all SQL dialects including MySQL.`,
         metadata: { column: col, operator: op },
       });
     };
@@ -1648,6 +1659,22 @@ const BQ_ONLY_FUNCS = [
 function detectDialectMismatch(sql: string, dialect: string): ValidationIssue[] {
   if (dialect === 'bigquery') return [];
   const issues: ValidationIssue[] = [];
+
+  // `||` is string concat in PostgreSQL but logical OR in default MySQL — a
+  // MySQL author may write it expecting OR. Suggestion only; scoped to a string
+  // literal adjacent to `||` so we don't nag legitimate column concatenation.
+  if (dialect === 'postgresql' && /'\s*\|\||\|\|\s*'/.test(sql)) {
+    issues.push({
+      id: 'DIALECT_MISMATCH',
+      severity: 'suggestion',
+      title: '`||` is string concatenation in PostgreSQL',
+      description: `In PostgreSQL, \`||\` concatenates strings — it is NOT a logical OR (that's MySQL's default behaviour). Confirm this is intentional.`,
+      fix: `If you meant a logical OR, use OR. If you meant string concatenation, \`||\` is correct in PostgreSQL.`,
+      offendingClause: 'WHERE',
+      metadata: { construct: 'double_pipe', dialect },
+    });
+  }
+
   for (const fn of BQ_ONLY_FUNCS) {
     if (!new RegExp(`\\b${fn}\\s*\\(`, 'i').test(sql)) continue;
     const pgFix =
@@ -2013,6 +2040,46 @@ function detectDialectLimitTop(sql: string, dialect: string): ValidationIssue[] 
       fix: `TOP is SQL Server syntax. In PostgreSQL use: LIMIT ${n}`,
       offendingClause: 'SELECT',
       metadata: { construct: 'sqlserver_top', dialect },
+    });
+  }
+
+  // Snowflake/BigQuery `QUALIFY` clause — not valid in PostgreSQL/MySQL.
+  if (/\bQUALIFY\b/i.test(sql) && dialect !== 'snowflake' && dialect !== 'bigquery') {
+    issues.push({
+      id: 'DIALECT_MISMATCH',
+      severity: 'warning',
+      title: 'QUALIFY is Snowflake/BigQuery syntax',
+      description: `QUALIFY is Snowflake/BigQuery-specific and will not run in ${dialect}.`,
+      fix: `QUALIFY is Snowflake/BigQuery syntax. In PostgreSQL wrap the window function in a subquery or CTE and filter with WHERE rn = 1.`,
+      offendingClause: 'SELECT',
+      metadata: { construct: 'qualify', dialect },
+    });
+  }
+
+  // BigQuery backtick identifiers — invalid in PostgreSQL/Snowflake (MySQL also
+  // uses backticks, so only flag for postgresql/snowflake).
+  if (/`/.test(sql) && (dialect === 'postgresql' || dialect === 'snowflake')) {
+    issues.push({
+      id: 'DIALECT_MISMATCH',
+      severity: 'warning',
+      title: 'Backtick identifiers are BigQuery syntax',
+      description: `Backtick-quoted identifiers are BigQuery syntax and will not parse in ${dialect}.`,
+      fix: `Backtick identifiers are BigQuery syntax. Use double quotes in PostgreSQL/Snowflake: "user_id".`,
+      offendingClause: 'SELECT',
+      metadata: { construct: 'backtick', dialect },
+    });
+  }
+
+  // Snowflake FLATTEN / LATERAL FLATTEN — invalid outside Snowflake.
+  if (/\bFLATTEN\s*\(/i.test(sql) && dialect !== 'snowflake') {
+    issues.push({
+      id: 'DIALECT_MISMATCH',
+      severity: 'warning',
+      title: 'FLATTEN is Snowflake syntax',
+      description: `FLATTEN / LATERAL FLATTEN is Snowflake-specific and will not run in ${dialect}.`,
+      fix: `FLATTEN is Snowflake syntax. In PostgreSQL use jsonb_array_elements() or unnest().`,
+      offendingClause: 'FROM',
+      metadata: { construct: 'flatten', dialect },
     });
   }
 

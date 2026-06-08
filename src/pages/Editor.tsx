@@ -225,7 +225,7 @@ export function EditorPage() {
           >
             SafeSQL
           </a>
-          <span style={{ color: '#52525b', fontSize: 11 }}>v0.6.0</span>
+          <span style={{ color: '#52525b', fontSize: 11 }}>v0.7.0</span>
           {appUser && (
             <UsageMeter
               count={appUser.validations_this_month}

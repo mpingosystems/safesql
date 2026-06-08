@@ -618,20 +618,22 @@ function detectHallucinatedColumn(ast: any, schema?: SchemaDefinition): Validati
       }
     }
 
-    // Single-table FROM resolution context (else null = bare cols deferred).
-    let singleFromTable: SchemaDefinition['tables'][number] | null = null;
-    if (
+    // D36: bare-column resolution context. We can resolve bare (unqualified)
+    // columns only when the statement declares no CTE and no subquery-in-FROM
+    // (those introduce columns we can't see). fromSchemaTables = the base
+    // FROM/JOIN tables present in the schema.
+    const fromHasSubquery = Array.isArray(stmt.from) && stmt.from.some((f: any) => f?.expr);
+    const canResolveBare =
       stmt.type === 'select' &&
       Array.isArray(stmt.from) &&
-      stmt.from.length === 1 &&
-      !Array.isArray(stmt.with)
-    ) {
-      const f = stmt.from[0];
-      // Plain table ref only — exclude FROM subqueries (f.expr.ast).
-      if (f && typeof f.table === 'string' && !f.expr) {
-        singleFromTable = tableByName.get(f.table) ?? null;
-      }
-    }
+      stmt.from.length >= 1 &&
+      !Array.isArray(stmt.with) &&
+      !fromHasSubquery;
+    const fromSchemaTables: SchemaDefinition['tables'] = canResolveBare
+      ? (stmt.from
+          .map((f: any) => (typeof f?.table === 'string' ? tableByName.get(f.table) : undefined))
+          .filter(Boolean) as SchemaDefinition['tables'])
+      : [];
 
     // SELECT-clause output aliases — ORDER BY can legally reference these,
     // so don't flag them as hallucinated bare columns.
@@ -648,27 +650,54 @@ function detectHallucinatedColumn(ast: any, schema?: SchemaDefinition): Validati
       if (!colName || colName === '*') return;
 
       if (!tableQual) {
-        // Bare column — only resolve when single-table FROM context is set.
-        if (!singleFromTable) return;
+        // D36: bare unqualified column resolution (single- AND multi-table).
+        if (fromSchemaTables.length === 0) return; // can't resolve (CTE / subquery FROM / unknown tables)
         if (selectAliases.has(colName)) return;
-        if (singleFromTable.columns.some((c) => c.name === colName)) return;
-        const key = `${singleFromTable.name}.${colName}`;
+        const owners = fromSchemaTables.filter((t) => t.columns.some((c) => c.name === colName));
+        // On ≥1 table → resolvable; if on 2+ that's AMBIGUOUS_COLUMN's job (D34),
+        // not a hallucination. Only flag when it exists on NONE of the tables.
+        if (owners.length >= 1) return;
+        const key = `bare.${colName}`;
         if (seen.has(key)) return;
         seen.add(key);
-        const colNames = singleFromTable.columns.map((c) => c.name);
-        const closest = nearestName(colName, colNames);
-        issues.push({
-          id: 'HALLUCINATED_COLUMN',
-          severity: 'error',
-          title: `Column "${colName}" not found on table "${singleFromTable.name}"`,
-          description:
-            `The query references "${colName}", but that column does not exist on "${singleFromTable.name}". ` +
-            `This will fail at execution. Common cause: AI-generated SQL hallucinating a plausible column name.`,
-          fix: closest
-            ? `Did you mean "${closest}"? Columns on "${singleFromTable.name}": ${colNames.join(', ')}.`
-            : `Columns on "${singleFromTable.name}": ${colNames.join(', ') || '(none)'}.`,
-          metadata: { table: singleFromTable.name, column: colName, suggestion: closest ?? null },
-        });
+
+        if (fromSchemaTables.length === 1) {
+          // Single table — keep the precise original message + metadata.
+          const t = fromSchemaTables[0];
+          const colNames = t.columns.map((c) => c.name);
+          const closest = nearestName(colName, colNames);
+          issues.push({
+            id: 'HALLUCINATED_COLUMN',
+            severity: 'error',
+            title: `Column "${colName}" not found on table "${t.name}"`,
+            description:
+              `The query references "${colName}", but that column does not exist on "${t.name}". ` +
+              `This will fail at execution. Common cause: AI-generated SQL hallucinating a plausible column name.`,
+            fix: closest
+              ? `Did you mean "${closest}"? Columns on "${t.name}": ${colNames.join(', ')}.`
+              : `Columns on "${t.name}": ${colNames.join(', ') || '(none)'}.`,
+            offendingColumn: colName,
+            metadata: { table: t.name, column: colName, suggestion: closest ?? null },
+          });
+        } else {
+          // Multiple tables — the column is on NONE of them (D36 multi-table).
+          const tableNames = fromSchemaTables.map((t) => t.name);
+          const allCols = fromSchemaTables.flatMap((t) => t.columns.map((c) => c.name));
+          const closest = nearestName(colName, allCols);
+          issues.push({
+            id: 'HALLUCINATED_COLUMN',
+            severity: 'error',
+            title: `Column "${colName}" not found on any table in the query`,
+            description:
+              `The query references "${colName}", but that column does not exist on any of: ${tableNames.join(', ')}. ` +
+              `This will fail at execution. Common cause: AI-generated SQL hallucinating a plausible column name.`,
+            fix: closest
+              ? `Did you mean "${closest}"? Available columns: ${allCols.join(', ')}.`
+              : `Columns available across ${tableNames.join(', ')}: ${allCols.join(', ') || '(none)'}.`,
+            offendingColumn: colName,
+            metadata: { table: null, column: colName, tables: tableNames, suggestion: closest ?? null },
+          });
+        }
         return;
       }
 
@@ -747,6 +776,18 @@ function nearestName(needle: string, hay: string[]): string | null {
   const maxLen = Math.max(needle.length, best.name.length);
   const threshold = Math.max(3, Math.ceil(maxLen * 0.4));
   return best.d <= threshold ? best.name : null;
+}
+
+// D35 alias "did you mean?" — stricter (edit distance ≤ 2) since aliases are
+// short, so the 40%-of-length rule in nearestName would over-suggest.
+function nearestAlias(needle: string, candidates: string[]): string | null {
+  if (!needle || candidates.length === 0) return null;
+  let best: { name: string; d: number } | null = null;
+  for (const c of candidates) {
+    const d = levenshtein(needle.toLowerCase(), c.toLowerCase());
+    if (best === null || d < best.d) best = { name: c, d };
+  }
+  return best && best.d <= 2 ? best.name : null;
 }
 
 function levenshtein(a: string, b: string): number {
@@ -1082,14 +1123,18 @@ function detectUnknownAlias(ast: any): ValidationIssue[] {
       const q = getColumnTable(node);
       if (!q || valid.has(q) || seen.has(q)) return;
       seen.add(q);
+      // D35: Levenshtein-nearest defined alias (edit distance ≤ 2) as a hint.
+      const col = getColumnName(node);
+      const nearest = nearestAlias(q, [...valid]);
+      const didYouMean = nearest ? ` Did you mean ${nearest}${col && col !== '*' ? `.${col}` : ''}?` : '';
       issues.push({
         id: 'UNKNOWN_ALIAS',
         severity: 'error',
         title: `Alias "${q}" is not defined`,
         description: `The query references "${q}.…" but no table or alias named "${q}" is defined in FROM / JOIN.`,
-        fix: `Defined aliases in this query: ${[...valid].join(', ') || '(none)'}. Fix the qualifier or add "${q}" to FROM.`,
+        fix: `Defined aliases in this query: ${[...valid].join(', ') || '(none)'}.${didYouMean} Fix the qualifier or add "${q}" to FROM.`,
         offendingTable: q,
-        metadata: { alias: q, defined: [...valid] },
+        metadata: { alias: q, defined: [...valid], suggestion: nearest ?? null },
       });
     };
     walkColumnRefs(stmt.columns, visit);

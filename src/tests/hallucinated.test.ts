@@ -119,12 +119,29 @@ describe('D9: HALLUCINATED_COLUMN', () => {
     expect(issue!.metadata?.column).toBe('lifetime_value');
   });
 
-  it('does NOT flag bare columns with multi-table FROM (joins still deferred)', () => {
-    // With JOINs the resolver can't unambiguously pick a table; v2 work.
+  it('D36 flags a bare unqualified column not on any table (multi-table FROM)', () => {
+    // Sprint 6 D36: resolves the v1 deferral — lifetime_value is on neither
+    // users nor orders, so it's flagged across the whole FROM list.
     const r = v(
       'SELECT lifetime_value FROM users u JOIN orders o ON o.user_id = u.id',
     );
+    const issue = r.errors.find((e) => e.id === 'HALLUCINATED_COLUMN');
+    expect(issue).toBeDefined();
+    expect(issue!.metadata?.column).toBe('lifetime_value');
+    expect(issue!.offendingColumn).toBe('lifetime_value');
+    expect(r.riskScore).toBeLessThan(50);
+  });
+
+  it('D36 does NOT flag a bare column that exists on one of the JOIN tables', () => {
+    // `total_amount` is on orders only → resolvable, not hallucinated.
+    const r = v('SELECT total_amount FROM users u JOIN orders o ON o.user_id = u.id');
     expect(r.errors.find((e) => e.id === 'HALLUCINATED_COLUMN')).toBeUndefined();
+  });
+
+  it('D36 does NOT double-fire with D9 (qualified) on the same column', () => {
+    const r = v('SELECT u.lifetime_value FROM users u JOIN orders o ON o.user_id = u.id');
+    const hits = r.errors.filter((e) => e.id === 'HALLUCINATED_COLUMN');
+    expect(hits.length).toBe(1); // only the qualified D9 finding
   });
 
   it('does NOT flag bare columns when a CTE is declared (CTE scope deferred)', () => {

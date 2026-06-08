@@ -1,0 +1,103 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "SafeSQL Validation API",
+    "version": "0.5.0",
+    "description": "Pre-execution semantic SQL validation. Runs the same 33-detector engine as the SafeSQL editor over HTTP — embed it in text-to-SQL pipelines and CI.",
+    "contact": { "name": "SafeSQL", "url": "https://safesqlpro.dev" }
+  },
+  "servers": [{ "url": "https://safesqlpro.dev" }],
+  "paths": {
+    "/api/validate": {
+      "post": {
+        "summary": "Validate a SQL query",
+        "description": "Returns a structured ValidationReport (errors, warnings, suggestions, risk score). Provide DDL to enable schema-aware detectors.",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ValidateRequest" },
+              "example": {
+                "sql": "SELECT id, lifetime_value FROM users",
+                "ddl": "CREATE TABLE users (id UUID PRIMARY KEY, email TEXT)",
+                "dialect": "postgresql",
+                "source": "cursor"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation report",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ValidationReport" },
+                "example": {
+                  "riskScore": 25,
+                  "executionSafe": false,
+                  "errors": [
+                    { "id": "HALLUCINATED_COLUMN", "severity": "error", "description": "Column lifetime_value does not exist on users", "fix": "Remove it or add it to the schema." }
+                  ],
+                  "warnings": [],
+                  "suggestions": [],
+                  "processingMs": 12,
+                  "detectorVersion": "0.5.0"
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "sql field is required" } } } },
+          "401": { "description": "Missing or invalid API key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Invalid API key. Get yours at safesqlpro.dev/settings" } } } },
+          "429": { "description": "Rate limit exceeded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Rate limit exceeded. Upgrade at safesqlpro.dev/pricing" } } } },
+          "500": { "description": "Server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "options": { "summary": "CORS preflight", "responses": { "204": { "description": "No content" } } }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "ssk_live_*", "description": "API key from safesqlpro.dev/settings. Header: Authorization: Bearer ssk_live_xxxxx" }
+    },
+    "schemas": {
+      "ValidateRequest": {
+        "type": "object",
+        "required": ["sql"],
+        "properties": {
+          "sql": { "type": "string", "description": "The SQL query to validate." },
+          "ddl": { "type": "string", "description": "Optional CREATE TABLE DDL to enable schema-aware detectors." },
+          "dialect": { "type": "string", "enum": ["postgresql", "mysql", "bigquery", "snowflake"], "default": "postgresql" },
+          "source": { "type": "string", "enum": ["cursor", "copilot", "chatgpt", "manual", "unknown"], "description": "Where the SQL came from (analytics tagging)." },
+          "include_ai_explanations": { "type": "boolean", "default": false }
+        }
+      },
+      "Issue": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "description": "issueType, e.g. AGGREGATE_OVER_FANOUT_JOIN" },
+          "severity": { "type": "string", "enum": ["error", "warning", "suggestion"] },
+          "offendingClause": { "type": "string" },
+          "offendingTable": { "type": "string" },
+          "offendingColumn": { "type": "string" },
+          "description": { "type": "string" },
+          "fix": { "type": "string" },
+          "scoreImpact": { "type": "number" }
+        }
+      },
+      "ValidationReport": {
+        "type": "object",
+        "properties": {
+          "riskScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "executionSafe": { "type": "boolean" },
+          "errors": { "type": "array", "items": { "$ref": "#/components/schemas/Issue" } },
+          "warnings": { "type": "array", "items": { "$ref": "#/components/schemas/Issue" } },
+          "suggestions": { "type": "array", "items": { "$ref": "#/components/schemas/Issue" } },
+          "processingMs": { "type": "number" },
+          "detectorVersion": { "type": "string" }
+        }
+      },
+      "Error": { "type": "object", "properties": { "error": { "type": "string" } } }
+    }
+  }
+}

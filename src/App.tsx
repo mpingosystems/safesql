@@ -3,8 +3,9 @@ import { LandingPage } from './pages/Landing';
 import { EditorPage } from './pages/Editor';
 import { ShareViewPage } from './pages/ShareView';
 import { AnalyticsPage } from './pages/Analytics';
+import { SettingsPage } from './pages/Settings';
 
-type Route = 'landing' | 'editor' | 'pricing' | 'share' | 'analytics';
+type Route = 'landing' | 'editor' | 'pricing' | 'share' | 'analytics' | 'settings';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -13,6 +14,7 @@ function routeFromLocation(): Route {
   const h = window.location.hash.replace(/^#/, '').replace(/\?.*$/, '');
   if (h.startsWith('/editor')) return 'editor';
   if (h.startsWith('/analytics')) return 'analytics';
+  if (h.startsWith('/settings')) return 'settings';
   if (h.startsWith('/pricing')) return 'pricing';
   if (h.startsWith('/v/')) return 'share';
   return 'landing';
@@ -40,6 +42,8 @@ function App() {
       return <ShareViewPage />;
     case 'analytics':
       return <AnalyticsPage />;
+    case 'settings':
+      return <SettingsPage />;
     default:
       return <LandingPage />;
   }

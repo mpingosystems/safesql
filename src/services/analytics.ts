@@ -144,3 +144,101 @@ export function emptyAnalytics(): {
     distribution: { RISKY: 0, REVIEW: 0, CAUTION: 0, SAFE: 0 },
   };
 }
+
+// ── Sprint 8 Part 2 — team analytics ─────────────────────────────────────────
+export interface TeamValidationRecord extends ValidationRecord {
+  member: string; // author email or name
+  permalink_id?: string | null;
+}
+
+export interface MemberStat {
+  member: string;
+  validations: number;
+  passRate: number; // % with no error and no warning
+  avgScore: number;
+}
+
+// Members ranked by pass rate (then avg score) — the leaderboard / coaching view.
+export function computeMemberLeaderboard(records: TeamValidationRecord[]): MemberStat[] {
+  const byMember = new Map<string, TeamValidationRecord[]>();
+  for (const r of records) {
+    if (!byMember.has(r.member)) byMember.set(r.member, []);
+    byMember.get(r.member)!.push(r);
+  }
+  const out: MemberStat[] = [];
+  for (const [member, rows] of byMember) {
+    const total = rows.length;
+    const clean = rows.filter((r) => r.error_count === 0 && r.warning_count === 0).length;
+    out.push({
+      member,
+      validations: total,
+      passRate: total ? Math.round((clean / total) * 100) : 0,
+      avgScore: total ? Math.round(rows.reduce((s, r) => s + (r.risk_score ?? 0), 0) / total) : 0,
+    });
+  }
+  return out.sort((a, b) => b.passRate - a.passRate || b.avgScore - a.avgScore);
+}
+
+// Issue types ranked across the whole team (reuses the per-user counter).
+export function computeTeamTopIssues(records: TeamValidationRecord[], top = 10): IssueTypeCount[] {
+  return computeTopIssueTypes(records, top);
+}
+
+export interface RiskyQuery {
+  member: string;
+  score: number;
+  topIssue: string;
+  permalinkId?: string | null;
+  createdAt?: string;
+}
+
+// Recent high-risk queries (score < 70), newest first.
+export function computeRiskyQueryLog(records: TeamValidationRecord[], limit = 20): RiskyQuery[] {
+  return records
+    .filter((r) => r.risk_score < 70)
+    .sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
+    .slice(0, limit)
+    .map((r) => {
+      const issues = [...(r.report?.errors ?? []), ...(r.report?.warnings ?? [])];
+      return {
+        member: r.member,
+        score: r.risk_score,
+        topIssue: issues[0]?.id ?? '—',
+        permalinkId: r.permalink_id ?? null,
+        createdAt: r.created_at,
+      };
+    });
+}
+
+export interface TeamOverview {
+  total: number;
+  avgScore: number;
+  mostCommonError: string | null;
+  lowestPassRateMember: string | null;
+}
+
+export function computeTeamOverview(records: TeamValidationRecord[]): TeamOverview {
+  const total = records.length;
+  const avgScore = total ? Math.round(records.reduce((s, r) => s + (r.risk_score ?? 0), 0) / total) : 0;
+  const mostCommonError = computeTeamTopIssues(records, 1)[0]?.issueType ?? null;
+  const leaderboard = computeMemberLeaderboard(records);
+  const lowestPassRateMember = leaderboard.length ? leaderboard[leaderboard.length - 1].member : null;
+  return { total, avgScore, mostCommonError, lowestPassRateMember };
+}
+
+// Team-gate: non-team caller gets an empty result flagged for the upgrade prompt.
+export function emptyTeamAnalytics(): {
+  overview: TeamOverview;
+  leaderboard: MemberStat[];
+  topIssues: IssueTypeCount[];
+  risky: RiskyQuery[];
+  upgradeRequired: true;
+} {
+  return {
+    overview: { total: 0, avgScore: 0, mostCommonError: null, lowestPassRateMember: null },
+    leaderboard: [],
+    topIssues: [],
+    risky: [],
+    upgradeRequired: true,
+  };
+}

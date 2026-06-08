@@ -1,8 +1,13 @@
+export type SqlSource = 'cursor' | 'copilot' | 'chatgpt' | 'manual' | 'unknown';
+
 export interface ValidationRequest {
   sql: string;
   schema?: SchemaDefinition;
   dialect: 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
   expectedRowCount?: number;
+  // PQ1 — LLM source tagging. Where the SQL came from, so AI-generated query
+  // quality can be tracked separately from human-authored SQL.
+  source?: SqlSource;
 }
 
 export interface ValidationReport {
@@ -16,12 +21,24 @@ export interface ValidationReport {
 }
 
 export interface ValidationIssue {
+  // `id` is the canonical detector identifier. It doubles as the Issue Object
+  // Contract's `issueType` field (Sprint 3 §10) — same string, two names kept
+  // so existing tests/UI that read `id` and external consumers that expect
+  // `issueType` both work.
   id: DetectorId;
   severity: 'error' | 'warning' | 'suggestion';
   title: string;
   description: string;
   explanation?: string;
   fix?: string;
+  // ── Issue Object Contract (Sprint 3 §10) ──────────────────────────────────
+  // The clause / table / column the finding points at, where applicable. Used
+  // both for human messaging and to anchor Monaco inline markers (PQ3).
+  offendingClause?: 'SELECT' | 'FROM' | 'JOIN' | 'WHERE' | 'GROUP BY' | 'HAVING' | 'ORDER BY';
+  offendingTable?: string;
+  offendingColumn?: string;
+  // Negative number: how much this finding subtracts from a perfect 100.
+  scoreImpact?: number;
   lineStart?: number;
   lineEnd?: number;
   columnStart?: number;
@@ -42,6 +59,23 @@ export type DetectorId =
   | 'NULL_EQUALITY_COMPARISON'
   | 'NOT_IN_NULLABLE'
   | 'AVG_OVER_NULLABLE'
+  // ── Sprint 3 additions ────────────────────────────────────────────────────
+  | 'UNKNOWN_ALIAS'
+  | 'AMBIGUOUS_COLUMN'
+  | 'LEFT_JOIN_FILTERED_IN_WHERE'
+  | 'SUSPICIOUS_JOIN_KEY'
+  | 'CARTESIAN_JOIN'
+  | 'CROSS_JOIN_RISK'
+  | 'AGGREGATE_OVER_FANOUT_JOIN'
+  | 'MULTIPLE_ONE_TO_MANY_JOINS'
+  | 'SCD_JOIN_WITHOUT_EFFECTIVE_DATE'
+  | 'INTEGER_DIVISION_RISK'
+  | 'COUNT_PARENT_AFTER_CHILD_JOIN'
+  | 'MISSING_TIME_FILTER'
+  | 'DIALECT_MISMATCH'
+  | 'NON_DETERMINISTIC_WINDOW_ORDER'
+  | 'DESTRUCTIVE_DDL'
+  | 'DESTRUCTIVE_TRUNCATE'
   | 'SYNTAX_ERROR';
 
 export interface SchemaDefinition {

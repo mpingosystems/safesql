@@ -1,5 +1,6 @@
 import { Parser } from 'node-sql-parser';
 import type {
+  DetectorId,
   SchemaDefinition,
   ValidationIssue,
   ValidationReport,
@@ -51,6 +52,7 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
     };
   }
 
+  // ── D1–D12 (Sprint 1-2) ────────────────────────────────────────────────────
   issues.push(...detectMissingWhereDestructive(ast));
   issues.push(...detectIncompleteGroupBy(ast));
   issues.push(...detectContradictoryFilter(ast));
@@ -64,12 +66,32 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   issues.push(...detectNotInNullable(ast, request.schema));
   issues.push(...detectAvgOverNullable(ast, request.schema));
 
+  // ── Sprint 3 additions ──────────────────────────────────────────────────────
+  issues.push(...detectDestructiveDDL(ast));
+  issues.push(...detectUnknownAlias(ast));
+  issues.push(...detectAmbiguousColumn(ast, request.schema));
+  issues.push(...detectCartesianAndCrossJoin(ast));
+  issues.push(...detectLeftJoinFilteredInWhere(ast));
+  issues.push(...detectSuspiciousJoinKey(ast, request.schema));
+  issues.push(...detectFanOutJoins(ast));
+  issues.push(...detectScdJoinWithoutEffectiveDate(ast));
+  issues.push(...detectIntegerDivision(ast));
+  issues.push(...detectCountParentAfterChildJoin(ast));
+  issues.push(...detectMissingTimeFilter(ast, request.schema));
+  issues.push(...detectDialectMismatch(request.sql, request.dialect));
+  issues.push(...detectNonDeterministicWindow(ast));
+
+  // Issue Object Contract (§10): make sure every finding carries the offending
+  // anchor fields + a scoreImpact, deriving them from legacy `metadata`/severity
+  // when a detector didn't set them explicitly.
+  for (const issue of issues) normalizeIssueContract(issue);
+
   const errors = issues.filter((i) => i.severity === 'error');
   const warnings = issues.filter((i) => i.severity === 'warning');
   const suggestions = issues.filter((i) => i.severity === 'suggestion');
 
   return {
-    riskScore: calculateRiskScore(errors.length, warnings.length, suggestions.length),
+    riskScore: calculateRiskScore(issues),
     executionSafe: errors.length === 0,
     errors,
     warnings,
@@ -78,17 +100,69 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   };
 }
 
-function calculateRiskScore(
-  errorCount: number,
-  warningCount: number,
-  suggestionCount: number,
-): number {
-  if (errorCount > 0) return Math.max(0, 40 - errorCount * 15);
-  if (warningCount > 0) return Math.max(41, 85 - warningCount * 10);
+// High-risk warnings land in the 41-69 band; everything else warning-level is a
+// "medium" warning in the 70-84 band. This is the §11 Score Policy made concrete.
+const HIGH_RISK_WARNINGS = new Set<DetectorId>([
+  'LEFT_JOIN_FILTERED_IN_WHERE',
+  'SUSPICIOUS_JOIN_KEY',
+  'CROSS_JOIN_RISK',
+  'AGGREGATE_OVER_FANOUT_JOIN',
+  'MULTIPLE_ONE_TO_MANY_JOINS',
+  'SCD_JOIN_WITHOUT_EFFECTIVE_DATE',
+  'MISSING_TIME_FILTER',
+  'DIALECT_MISMATCH',
+  'AMBIGUOUS_COLUMN',
+]);
+
+// §11 Score Policy. Tier of the WORST finding sets the band; additional findings
+// of that tier nudge the score down within the band. Fixed queries (fewer/less
+// severe findings) always score strictly higher than their flawed originals.
+function calculateRiskScore(issues: ValidationIssue[]): number {
+  const errors = issues.filter((i) => i.severity === 'error');
+  if (errors.length > 0) return Math.max(0, 40 - errors.length * 15); // 0-40 band
+
+  const warnings = issues.filter((i) => i.severity === 'warning');
+  if (warnings.length > 0) {
+    const highRisk = warnings.filter((w) => HIGH_RISK_WARNINGS.has(w.id));
+    if (highRisk.length > 0) {
+      return Math.max(41, 60 - (highRisk.length - 1) * 6); // 41-69 band
+    }
+    return Math.max(70, 80 - (warnings.length - 1) * 4); // 70-84 band
+  }
+
+  const suggestions = issues.filter((i) => i.severity === 'suggestion');
   // Suggestions stay in the Safe band but visibly nudge the score so users
   // notice them rather than seeing an unchanged 100.
-  if (suggestionCount > 0) return Math.max(85, 100 - suggestionCount * 5);
+  if (suggestions.length > 0) return Math.max(85, 100 - suggestions.length * 5);
   return 100;
+}
+
+// Default per-tier scoreImpact for the contract. Detectors may override by
+// setting `issue.scoreImpact` directly; this only fills the gaps.
+const DEFAULT_SCORE_IMPACT: Record<ValidationIssue['severity'], number> = {
+  error: -75,
+  warning: -25,
+  suggestion: -5,
+};
+
+function normalizeIssueContract(issue: ValidationIssue): void {
+  const meta = (issue.metadata ?? {}) as Record<string, unknown>;
+  if (issue.offendingTable === undefined) {
+    const t = meta.table ?? meta.tableName ?? meta.joinTable ?? meta.sourceTable;
+    if (typeof t === 'string') issue.offendingTable = t;
+  }
+  if (issue.offendingColumn === undefined) {
+    const c = meta.column ?? meta.sourceColumn;
+    if (typeof c === 'string') issue.offendingColumn = c;
+  }
+  if (issue.scoreImpact === undefined) {
+    // High-risk warnings bite harder than medium ones, matching the bands.
+    if (issue.severity === 'warning' && HIGH_RISK_WARNINGS.has(issue.id)) {
+      issue.scoreImpact = -40;
+    } else {
+      issue.scoreImpact = DEFAULT_SCORE_IMPACT[issue.severity];
+    }
+  }
 }
 
 function asStatements(ast: any): any[] {
@@ -879,5 +953,637 @@ function detectAvgOverNullable(ast: any, schema?: SchemaDefinition): ValidationI
       });
     }
   }
+  return issues;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Sprint 3 detectors
+// ════════════════════════════════════════════════════════════════════════════
+
+// Shared alias → real-table lookup for a single SELECT statement.
+function buildAliasMap(stmt: any): Map<string, string> {
+  const m = new Map<string, string>();
+  if (Array.isArray(stmt?.from)) {
+    for (const f of stmt.from) {
+      if (typeof f?.table === 'string') {
+        m.set(f.table, f.table);
+        if (typeof f.as === 'string' && f.as) m.set(f.as, f.table);
+      }
+    }
+  }
+  return m;
+}
+
+const AGG_MEASURE_FUNCS = new Set(['sum', 'avg', 'min', 'max']);
+
+function isCountStar(expr: any): boolean {
+  if (!expr || expr.type !== 'aggr_func') return false;
+  if (String(expr.name ?? '').toLowerCase() !== 'count') return false;
+  if (expr.args?.distinct) return false;
+  const arg = expr.args?.expr;
+  return arg?.type === 'star' || arg?.column === '*' || arg?.value === '*';
+}
+
+function isCountAgg(node: any): boolean {
+  return node?.type === 'aggr_func' && String(node.name ?? '').toLowerCase() === 'count';
+}
+
+// ── X3 / X4: Destructive DDL (DROP TABLE, TRUNCATE TABLE) — no schema ────────
+function detectDestructiveDDL(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (!stmt) continue;
+    const tableName =
+      Array.isArray(stmt.name) && stmt.name[0]?.table ? String(stmt.name[0].table) : undefined;
+    if (stmt.type === 'drop') {
+      issues.push({
+        id: 'DESTRUCTIVE_DDL',
+        severity: 'error',
+        title: `DROP ${stmt.keyword?.toUpperCase?.() ?? 'TABLE'} is irreversible`,
+        description: `DROP permanently deletes ${tableName ? `"${tableName}"` : 'the object'} and all its data. This cannot be undone.`,
+        fix: `If you only need to clear rows, use DELETE ... WHERE. If you must drop, take a backup first and run inside a transaction you can roll back.`,
+        offendingClause: 'FROM',
+        offendingTable: tableName,
+        metadata: { table: tableName, operation: 'drop' },
+      });
+    } else if (stmt.type === 'truncate') {
+      issues.push({
+        id: 'DESTRUCTIVE_TRUNCATE',
+        severity: 'error',
+        title: `TRUNCATE removes every row in ${tableName ? `"${tableName}"` : 'the table'}`,
+        description: `TRUNCATE deletes all rows and cannot be filtered with WHERE. In most engines it is not transactional and cannot be rolled back.`,
+        fix: `If you meant to remove specific rows, use DELETE FROM ${tableName ?? 'table'} WHERE .... Only TRUNCATE when you intend to wipe the entire table.`,
+        offendingClause: 'FROM',
+        offendingTable: tableName,
+        metadata: { table: tableName, operation: 'truncate' },
+      });
+    }
+  }
+  return issues;
+}
+
+// ── S3: Unknown alias (no schema) ────────────────────────────────────────────
+// A column qualifier (`x.col`) that is neither a defined alias nor a table name
+// in FROM/JOIN, nor a CTE / subquery alias.
+function detectUnknownAlias(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select') continue;
+
+    const valid = new Set<string>();
+    for (const n of collectLocalTableNames(stmt)) valid.add(n);
+    if (Array.isArray(stmt.from)) {
+      for (const f of stmt.from) {
+        if (typeof f?.table === 'string') valid.add(f.table);
+        if (typeof f?.as === 'string' && f.as) valid.add(f.as);
+      }
+    }
+    if (valid.size === 0) continue; // nothing to resolve against (e.g. FROM subquery only)
+
+    const seen = new Set<string>();
+    const visit = (node: any) => {
+      const q = getColumnTable(node);
+      if (!q || valid.has(q) || seen.has(q)) return;
+      seen.add(q);
+      issues.push({
+        id: 'UNKNOWN_ALIAS',
+        severity: 'error',
+        title: `Alias "${q}" is not defined`,
+        description: `The query references "${q}.…" but no table or alias named "${q}" is defined in FROM / JOIN.`,
+        fix: `Defined aliases in this query: ${[...valid].join(', ') || '(none)'}. Fix the qualifier or add "${q}" to FROM.`,
+        offendingTable: q,
+        metadata: { alias: q, defined: [...valid] },
+      });
+    };
+    walkColumnRefs(stmt.columns, visit);
+    walkColumnRefs(stmt.where, visit);
+    walkColumnRefs(stmt.from, visit);
+    walkColumnRefs(stmt.groupby, visit);
+    walkColumnRefs(stmt.orderby, visit);
+    walkColumnRefs(stmt.having, visit);
+  }
+  return issues;
+}
+
+// ── S4: Ambiguous unqualified column (schema required) ───────────────────────
+function detectAmbiguousColumn(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  if (!schema) return [];
+  const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  for (const t of schema.tables) tableByName.set(t.name, t);
+
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from) || stmt.from.length < 2) continue;
+
+    const fromTables = stmt.from
+      .map((f: any) => (typeof f?.table === 'string' ? tableByName.get(f.table) : undefined))
+      .filter(Boolean) as SchemaDefinition['tables'];
+    if (fromTables.length < 2) continue;
+
+    const selectAliases = new Set<string>();
+    for (const c of stmt.columns ?? []) if (typeof c?.as === 'string' && c.as) selectAliases.add(c.as);
+
+    const seen = new Set<string>();
+    const visit = (node: any) => {
+      if (getColumnTable(node)) return; // qualified — not ambiguous
+      const name = getColumnName(node);
+      if (!name || name === '*' || selectAliases.has(name)) return;
+      const owners = fromTables.filter((t) => t.columns.some((c) => c.name === name));
+      if (owners.length < 2 || seen.has(name)) return;
+      seen.add(name);
+      issues.push({
+        id: 'AMBIGUOUS_COLUMN',
+        severity: 'warning',
+        title: `Column "${name}" is ambiguous`,
+        description: `Column "${name}" exists on multiple tables in this query (${owners.map((o) => o.name).join(', ')}). The database cannot tell which one you mean.`,
+        fix: `Qualify the column, e.g. ${owners[0].name}.${name} or ${owners[1].name}.${name}.`,
+        offendingColumn: name,
+        metadata: { column: name, tables: owners.map((o) => o.name) },
+      });
+    };
+    walkColumnRefs(stmt.columns, visit);
+    walkColumnRefs(stmt.where, visit);
+    walkColumnRefs(stmt.groupby, visit);
+    walkColumnRefs(stmt.orderby, visit);
+    walkColumnRefs(stmt.having, visit);
+  }
+  return issues;
+}
+
+// ── J4 / J5: Cartesian join (no ON) and explicit CROSS JOIN — no schema ───────
+function detectCartesianAndCrossJoin(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from)) continue;
+    for (const f of stmt.from) {
+      if (!f?.join) continue;
+      const jt = String(f.join).toUpperCase();
+      const tableName = typeof f.table === 'string' ? f.table : f.as;
+      if (jt === 'CROSS JOIN') {
+        issues.push({
+          id: 'CROSS_JOIN_RISK',
+          severity: 'warning',
+          title: `CROSS JOIN with "${tableName}" produces N×M rows`,
+          description: `A CROSS JOIN pairs every row of one table with every row of "${tableName}". Confirm this Cartesian product is intentional.`,
+          fix: `If not intentional, replace CROSS JOIN with an INNER/LEFT JOIN and add an ON condition relating the two tables.`,
+          offendingClause: 'JOIN',
+          offendingTable: tableName,
+          metadata: { joinTable: tableName },
+        });
+      } else if (!f.on && !f.using) {
+        issues.push({
+          id: 'CARTESIAN_JOIN',
+          severity: 'error',
+          title: `JOIN with "${tableName}" has no ON clause`,
+          description: `A JOIN without an ON (or USING) clause produces a Cartesian product: every row of the left side paired with every row of "${tableName}".`,
+          fix: `Add a join condition, e.g. JOIN ${tableName} ON .... If a Cartesian product is intended, write CROSS JOIN explicitly.`,
+          offendingClause: 'JOIN',
+          offendingTable: tableName,
+          metadata: { joinTable: tableName },
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+// ── J1: LEFT JOIN filtered in WHERE (no schema) ──────────────────────────────
+// A predicate on the nullable (right) side of a LEFT JOIN, using a NULL-unsafe
+// operator in WHERE, silently converts the LEFT JOIN to an INNER JOIN.
+const NULL_UNSAFE_OPS = new Set([
+  '=', '!=', '<>', '>', '<', '>=', '<=', 'LIKE', 'NOT LIKE', 'IN', 'NOT IN',
+]);
+
+function detectLeftJoinFilteredInWhere(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !stmt.where || !Array.isArray(stmt.from)) continue;
+
+    const nullable = new Map<string, string>(); // alias/table → display table
+    for (const f of stmt.from) {
+      if (f?.join && String(f.join).toUpperCase() === 'LEFT JOIN') {
+        const real = typeof f.table === 'string' ? f.table : f.as;
+        if (typeof f.table === 'string') nullable.set(f.table, real);
+        if (typeof f.as === 'string' && f.as) nullable.set(f.as, real);
+      }
+    }
+    if (nullable.size === 0) continue;
+
+    const seen = new Set<string>();
+    walkPredicates(stmt.where, (node: any) => {
+      if (node?.type !== 'binary_expr') return;
+      const op = String(node.operator ?? '').toUpperCase();
+      if (!NULL_UNSAFE_OPS.has(op)) return;
+      for (const side of [node.left, node.right]) {
+        if (side?.type !== 'column_ref') continue;
+        const q = getColumnTable(side);
+        if (!q || !nullable.has(q)) continue;
+        const col = getColumnName(side) ?? '<expr>';
+        const tbl = nullable.get(q)!;
+        const key = `${q}.${col}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        issues.push({
+          id: 'LEFT_JOIN_FILTERED_IN_WHERE',
+          severity: 'warning',
+          title: `WHERE filter on "${q}.${col}" defeats the LEFT JOIN`,
+          description: `Filtering on "${q}.${col}" in the WHERE clause converts the LEFT JOIN on "${tbl}" to an implicit INNER JOIN, dropping all rows with no match.`,
+          fix: `Move the condition into the ON clause: LEFT JOIN ${tbl} ${q} ON ... AND ${q}.${col} ${op === '=' ? "= '...'" : op + ' ...'}`,
+          offendingClause: 'WHERE',
+          offendingTable: tbl,
+          offendingColumn: col,
+          metadata: { table: tbl, column: col, operator: op },
+        });
+        return;
+      }
+    });
+  }
+  return issues;
+}
+
+// Walk an ON tree, calling cb for each `=` binary_expr (descending AND/OR).
+function forEachOnEquality(node: any, cb: (left: any, right: any) => void): void {
+  if (!node || typeof node !== 'object') return;
+  if (node.type === 'binary_expr') {
+    const op = String(node.operator ?? '').toUpperCase();
+    if (op === 'AND' || op === 'OR') {
+      forEachOnEquality(node.left, cb);
+      forEachOnEquality(node.right, cb);
+      return;
+    }
+    if (op === '=') cb(node.left, node.right);
+  }
+}
+
+// ── J3: Suspicious join key (schema optional) ────────────────────────────────
+// Joining two identically-named columns (typically `id = id`) across tables is
+// almost always a mistake — the FK column was meant instead.
+function detectSuspiciousJoinKey(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  if (schema) for (const t of schema.tables) tableByName.set(t.name, t);
+
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from)) continue;
+    const aliasMap = buildAliasMap(stmt);
+    const seen = new Set<string>();
+
+    for (const f of stmt.from) {
+      if (!f?.join || !f.on) continue;
+      forEachOnEquality(f.on, (left: any, right: any) => {
+        if (left?.type !== 'column_ref' || right?.type !== 'column_ref') return;
+        const lcol = (getColumnName(left) ?? '').toLowerCase();
+        const rcol = (getColumnName(right) ?? '').toLowerCase();
+        const lq = getColumnTable(left);
+        const rq = getColumnTable(right);
+        if (!lcol || lcol !== rcol || lq === rq) return;
+        if (lcol !== 'id') return; // only the high-confidence `id = id` shape
+        const ltab = lq ? aliasMap.get(lq) ?? lq : '?';
+        const rtab = rq ? aliasMap.get(rq) ?? rq : '?';
+        const key = `${ltab}.${rtab}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+
+        // If schema knows a `<parent>_id` FK on either table, name it in the fix.
+        let suggestion = '';
+        const childFk = (childTab: string, parentTab: string) => {
+          const t = tableByName.get(childTab);
+          const guess = `${parentTab.replace(/s$/, '')}_id`;
+          return t?.columns.some((c) => c.name === guess) ? guess : null;
+        };
+        const fk = (rq && childFk(rtab, ltab)) || (lq && childFk(ltab, rtab)) || null;
+        if (fk) suggestion = ` The expected key is likely "${fk}".`;
+
+        issues.push({
+          id: 'SUSPICIOUS_JOIN_KEY',
+          severity: 'warning',
+          title: `Suspicious join key: ${ltab}.id = ${rtab}.id`,
+          description: `Joining "${ltab}.id" to "${rtab}.id" matches primary keys directly. If "${rtab}" belongs to "${ltab}", the correct join uses a foreign key, not id = id.${suggestion}`,
+          fix: `Verify the join key. A child→parent join usually reads like ${rtab}.${ltab.replace(/s$/, '')}_id = ${ltab}.id.`,
+          offendingClause: 'JOIN',
+          offendingTable: rtab,
+          offendingColumn: 'id',
+          metadata: { leftTable: ltab, rightTable: rtab },
+        });
+      });
+    }
+  }
+  return issues;
+}
+
+// ── F1 / F2: Fan-out joins (no schema) ───────────────────────────────────────
+// Two+ child tables joined to the SAME parent key cross-multiply. With a measure
+// aggregate (SUM/AVG/MIN/MAX) it inflates the measure (F1); otherwise it's a
+// multi-1:M count pattern (F2).
+function detectFanOutJoins(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from)) continue;
+    // CTE / subquery-in-FROM targets are pre-collapsed (1:1 with their key), so
+    // they don't fan out — exclude them to avoid flagging safe pre-aggregations.
+    const local = collectLocalTableNames(stmt);
+    const joins = stmt.from.filter(
+      (f: any) => f?.join && f.on && typeof f.table === 'string' && !local.has(f.table),
+    );
+    if (joins.length < 2) continue;
+    const aliasMap = buildAliasMap(stmt);
+
+    // Collect the qualified join-key column refs for each join.
+    const keyCount = new Map<string, number>();
+    const perJoin: Array<{ table: string; keys: Set<string> }> = [];
+    for (const j of joins) {
+      const keys = new Set<string>();
+      walkColumnRefs(j.on, (n: any) => {
+        const q = getColumnTable(n);
+        const c = getColumnName(n);
+        if (q && c) keys.add(`${q}.${c}`);
+      });
+      perJoin.push({ table: typeof j.table === 'string' ? j.table : j.as, keys });
+      for (const k of keys) keyCount.set(k, (keyCount.get(k) ?? 0) + 1);
+    }
+
+    const sharedKey = [...keyCount.entries()].find(([, n]) => n >= 2)?.[0];
+    if (!sharedKey) continue;
+    const children = perJoin.filter((p) => p.keys.has(sharedKey)).map((p) => p.table);
+    if (children.length < 2) continue;
+
+    // Measure aggregate over a qualified column?
+    let measure: { func: string; column: string; table: string } | null = null;
+    for (const col of stmt.columns ?? []) {
+      const e = col?.expr;
+      if (e?.type !== 'aggr_func') continue;
+      const fn = String(e.name ?? '').toLowerCase();
+      if (!AGG_MEASURE_FUNCS.has(fn)) continue;
+      const arg = e.args?.expr;
+      if (arg?.type !== 'column_ref') continue;
+      const q = getColumnTable(arg);
+      const c = getColumnName(arg);
+      if (!c) continue;
+      measure = { func: fn.toUpperCase(), column: c, table: q ? aliasMap.get(q) ?? q : '?' };
+      break;
+    }
+
+    if (measure) {
+      const offending = children.find((t) => t !== measure!.table) ?? children[1];
+      issues.push({
+        id: 'AGGREGATE_OVER_FANOUT_JOIN',
+        severity: 'warning',
+        title: `${measure.func}(${measure.column}) is inflated by the join to "${offending}"`,
+        description: `Joining "${offending}" alongside "${measure.table}" duplicates each "${measure.table}" row once per matching "${offending}" row, so ${measure.func}(${measure.column}) is multiplied.`,
+        fix: `Pre-aggregate "${measure.table}" before joining: WITH agg AS (SELECT <fk>, ${measure.func}(${measure.column}) AS v FROM ${measure.table} GROUP BY <fk>) then join agg and "${offending}" separately.`,
+        offendingClause: 'JOIN',
+        offendingTable: offending,
+        offendingColumn: measure.column,
+        metadata: { measure: `${measure.func}(${measure.column})`, joinTable: offending, children },
+      });
+    } else {
+      issues.push({
+        id: 'MULTIPLE_ONE_TO_MANY_JOINS',
+        severity: 'warning',
+        title: `Multiple one-to-many joins cross-multiply (${children.join(', ')})`,
+        description: `Joining both "${children[0]}" and "${children[1]}" to the same parent on the same key creates a cross-product of child rows per parent. Counts and sums across them will be wrong.`,
+        fix: `Aggregate each child table separately in CTEs before joining: one CTE per child grouped by the foreign key, then LEFT JOIN the pre-aggregated results.`,
+        offendingClause: 'JOIN',
+        offendingTable: children[1],
+        metadata: { children },
+      });
+    }
+  }
+  return issues;
+}
+
+// ── F4: SCD join without effective date (no schema) ──────────────────────────
+const SCD_NAME_RE = /history|log|audit|version|snapshot/i;
+const DATE_NAME_RE =
+  /date|time|timestamp|valid|effective|created|updated|expire|_at|_from|_to|month|year|day/i;
+
+function detectScdJoinWithoutEffectiveDate(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from)) continue;
+    for (const f of stmt.from) {
+      if (!f?.join || typeof f.table !== 'string' || !SCD_NAME_RE.test(f.table)) continue;
+      let hasDate = false;
+      walkColumnRefs(f.on, (n: any) => {
+        const c = getColumnName(n);
+        if (c && DATE_NAME_RE.test(c)) hasDate = true;
+      });
+      if (hasDate) continue;
+      issues.push({
+        id: 'SCD_JOIN_WITHOUT_EFFECTIVE_DATE',
+        severity: 'warning',
+        title: `Slowly-changing dimension "${f.table}" joined without a date range`,
+        description: `"${f.table}" looks like a history/audit table. Joining it without an effective-date condition can match multiple historical rows per record, inflating results.`,
+        fix: `Add an effective-date range to the ON clause, e.g. AND <fact>.event_date >= ${f.table}.valid_from AND (${f.table}.valid_to IS NULL OR <fact>.event_date < ${f.table}.valid_to).`,
+        offendingClause: 'JOIN',
+        offendingTable: f.table,
+        metadata: { table: f.table },
+      });
+    }
+  }
+  return issues;
+}
+
+// Recurse an expression for the first `/` binary_expr.
+function findDivision(node: any): any {
+  if (!node || typeof node !== 'object') return null;
+  if (node.type === 'binary_expr' && String(node.operator) === '/') return node;
+  for (const key of Object.keys(node)) {
+    const v = (node as any)[key];
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        const hit = findDivision(item);
+        if (hit) return hit;
+      }
+    } else if (v && typeof v === 'object') {
+      const hit = findDivision(v);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+// ── A1: Integer division truncation (no schema) ──────────────────────────────
+function detectIntegerDivision(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select') continue;
+    let flagged = false;
+    for (const col of stmt.columns ?? []) {
+      if (flagged) break;
+      const div = findDivision(col?.expr);
+      if (!div) continue;
+      if (div.left?.type === 'cast' || div.right?.type === 'cast') continue; // already cast
+      const intish = (n: any) =>
+        isCountAgg(n) || (n?.type === 'number' && Number.isInteger(n.value));
+      if (!intish(div.left) && !intish(div.right)) continue;
+      // At least one COUNT keeps this high-confidence (the classic ratio bug).
+      if (!isCountAgg(div.left) && !isCountAgg(div.right)) continue;
+      flagged = true;
+      issues.push({
+        id: 'INTEGER_DIVISION_RISK',
+        severity: 'warning',
+        title: 'Integer division truncates toward zero',
+        description: `Dividing two integer expressions (e.g. COUNT(...) / COUNT(...)) performs integer division, so any ratio below 1 truncates to 0.`,
+        fix: `Cast the numerator to a decimal: COUNT(...)::decimal / COUNT(...) (PostgreSQL) or CAST(... AS FLOAT) / ... .`,
+        offendingClause: 'SELECT',
+        metadata: { operator: '/' },
+      });
+    }
+  }
+  return issues;
+}
+
+// ── A3: COUNT(*) after joining a child table (no schema) ──────────────────────
+function detectCountParentAfterChildJoin(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !Array.isArray(stmt.from)) continue;
+    const joins = stmt.from.filter((f: any) => f?.join);
+    if (joins.length === 0) continue;
+    const childTable = typeof joins[0].table === 'string' ? joins[0].table : joins[0].as;
+    for (const col of stmt.columns ?? []) {
+      if (!isCountStar(col?.expr)) continue;
+      issues.push({
+        id: 'COUNT_PARENT_AFTER_CHILD_JOIN',
+        severity: 'warning',
+        title: 'COUNT(*) counts joined child rows, not parent rows',
+        description: `After joining "${childTable}", COUNT(*) counts one row per matched child row rather than per parent. The total will be inflated.`,
+        fix: `Count the parent's primary key distinctly: COUNT(DISTINCT <parent>.id) instead of COUNT(*).`,
+        offendingClause: 'SELECT',
+        offendingTable: childTable,
+        metadata: { joinTable: childTable },
+      });
+      break; // one finding per statement
+    }
+  }
+  return issues;
+}
+
+function isDateColumn(col: { name: string; type: string }): boolean {
+  return /date|time|timestamp/i.test(col.type) || DATE_NAME_RE.test(col.name);
+}
+
+// ── T1: Revenue/SUM aggregate without a time filter (schema required) ─────────
+// Scoped to queries that DO filter (have a WHERE) but omit a date predicate, so
+// plain GROUP-BY rollups aren't nagged.
+function detectMissingTimeFilter(ast: any, schema?: SchemaDefinition): ValidationIssue[] {
+  if (!schema) return [];
+  const issues: ValidationIssue[] = [];
+  const tableByName = new Map<string, SchemaDefinition['tables'][number]>();
+  for (const t of schema.tables) tableByName.set(t.name, t);
+
+  for (const stmt of asStatements(ast)) {
+    if (stmt?.type !== 'select' || !stmt.where || !Array.isArray(stmt.from)) continue;
+
+    const hasSum = (stmt.columns ?? []).some(
+      (c: any) =>
+        c?.expr?.type === 'aggr_func' &&
+        ['sum', 'count'].includes(String(c.expr.name ?? '').toLowerCase()),
+    );
+    if (!hasSum) continue;
+
+    const dateTable = stmt.from
+      .map((f: any) => (typeof f?.table === 'string' ? tableByName.get(f.table) : undefined))
+      .find((t: any) => t && t.columns.some((c: any) => isDateColumn(c)));
+    if (!dateTable) continue;
+
+    let hasDatePred = false;
+    walkColumnRefs(stmt.where, (n: any) => {
+      const c = getColumnName(n);
+      if (c && DATE_NAME_RE.test(c)) hasDatePred = true;
+    });
+    if (hasDatePred) continue;
+
+    issues.push({
+      id: 'MISSING_TIME_FILTER',
+      severity: 'warning',
+      title: `Aggregate over "${dateTable.name}" has no time window`,
+      description: `This query aggregates "${dateTable.name}" with a filter but no date condition, so it returns all-time totals rather than a reporting period.`,
+      fix: `Add a date filter, e.g. AND ${dateTable.name}.created_at >= CURRENT_DATE - INTERVAL '30 days'.`,
+      offendingClause: 'WHERE',
+      offendingTable: dateTable.name,
+      metadata: { table: dateTable.name },
+    });
+  }
+  return issues;
+}
+
+// ── Dialect mismatch (raw-text, dialect-aware) ───────────────────────────────
+// BigQuery-specific functions used while a non-BigQuery dialect is selected.
+const BQ_ONLY_FUNCS = [
+  'DATE_SUB', 'DATE_ADD', 'DATETIME_SUB', 'DATETIME_ADD', 'TIMESTAMP_SUB', 'TIMESTAMP_ADD',
+  'FORMAT_DATE', 'PARSE_DATE', 'SAFE_DIVIDE', 'SAFE_CAST', 'GENERATE_DATE_ARRAY', 'GENERATE_ARRAY',
+];
+
+function detectDialectMismatch(sql: string, dialect: string): ValidationIssue[] {
+  if (dialect === 'bigquery') return [];
+  const issues: ValidationIssue[] = [];
+  for (const fn of BQ_ONLY_FUNCS) {
+    if (!new RegExp(`\\b${fn}\\s*\\(`, 'i').test(sql)) continue;
+    const pgFix =
+      fn === 'DATE_SUB'
+        ? `PostgreSQL: CURRENT_DATE - INTERVAL '30 days'. Snowflake: DATEADD(day, -30, CURRENT_DATE()).`
+        : `Use the ${dialect} equivalent of ${fn}().`;
+    issues.push({
+      id: 'DIALECT_MISMATCH',
+      severity: 'warning',
+      title: `"${fn}()" is BigQuery syntax, not ${dialect}`,
+      description: `The function ${fn}() is BigQuery-specific and will not run in ${dialect}.`,
+      fix: pgFix,
+      offendingClause: 'WHERE',
+      metadata: { function: fn, dialect },
+    });
+  }
+  return issues;
+}
+
+// Find an `orderby` array anywhere under a window's OVER clause.
+function findWindowOrderBy(node: any): any[] | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node.orderby)) return node.orderby;
+  for (const key of Object.keys(node)) {
+    const v = (node as any)[key];
+    if (v && typeof v === 'object') {
+      const hit = findWindowOrderBy(v);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+// ── WN1: Non-deterministic window order (no schema) ──────────────────────────
+const RANKING_WINDOW_FUNCS = new Set(['row_number', 'rank', 'dense_rank']);
+
+function detectNonDeterministicWindow(ast: any): ValidationIssue[] {
+  const issues: ValidationIssue[] = [];
+  const found = new Set<string>();
+  const visit = (node: any) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.type === 'window_func' && node.over) {
+      const fn = String(node.name ?? '').toLowerCase();
+      if (RANKING_WINDOW_FUNCS.has(fn)) {
+        const ob = findWindowOrderBy(node.over);
+        if (ob && ob.length === 1 && !found.has(fn)) {
+          found.add(fn);
+          issues.push({
+            id: 'NON_DETERMINISTIC_WINDOW_ORDER',
+            severity: 'suggestion',
+            title: `${fn.toUpperCase()}() has no tie-breaker in ORDER BY`,
+            description: `${fn.toUpperCase()}() orders by a single column. When rows tie on that column, the assigned order is non-deterministic and can change between runs.`,
+            fix: `Add a unique secondary sort key, e.g. ORDER BY <col> DESC, id DESC.`,
+            offendingClause: 'SELECT',
+            metadata: { windowFunc: fn },
+          });
+        }
+      }
+    }
+    for (const key of Object.keys(node)) {
+      const v = (node as any)[key];
+      if (Array.isArray(v)) for (const item of v) visit(item);
+      else if (v && typeof v === 'object') visit(v);
+    }
+  };
+  for (const stmt of asStatements(ast)) visit(stmt);
   return issues;
 }

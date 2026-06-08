@@ -227,4 +227,50 @@ describe('semantic column inference', () => {
       expect(r).not.toMatch(PLACEHOLDER);
     }
   });
+
+  it('state → full US state name, not a status value', () => {
+    const statuses = ['active', 'pending', 'completed', 'cancelled', 'inactive', 'trial'];
+    for (let s = 1; s <= 20; s++) {
+      const r = String(sampleColumnValue('state', 'text', s));
+      expect(US_STATES).toContain(r);
+      expect(statuses).not.toContain(r);
+    }
+  });
+
+  it('state_code → 2-letter state code', () => {
+    const r = String(sampleColumnValue('state_code', 'text', 4));
+    expect(r).toMatch(/^[A-Z]{2}$/);
+    expect(STATE_CODES).toContain(r);
+  });
+
+  it('status → still returns a status value', () => {
+    const statuses = ['active', 'pending', 'completed', 'cancelled', 'inactive'];
+    for (let s = 1; s <= 10; s++) {
+      expect(statuses).toContain(String(sampleColumnValue('status', 'text', s)));
+    }
+  });
+
+  it('account_status / order_status → still return status values', () => {
+    const statuses = ['active', 'pending', 'completed', 'cancelled', 'inactive'];
+    expect(statuses).toContain(String(sampleColumnValue('account_status', 'text', 2)));
+    expect(statuses).toContain(String(sampleColumnValue('order_status', 'text', 3)));
+  });
 });
+
+// Mirror of the generator's pools so the state tests can assert membership.
+const US_STATES = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado', 'Connecticut',
+  'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa',
+  'Kansas', 'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts', 'Michigan',
+  'Minnesota', 'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada', 'New Hampshire',
+  'New Jersey', 'New Mexico', 'New York', 'North Carolina', 'North Dakota', 'Ohio',
+  'Oklahoma', 'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+  'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington', 'West Virginia',
+  'Wisconsin', 'Wyoming',
+];
+const STATE_CODES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+  'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT',
+  'VA', 'WA', 'WV', 'WI', 'WY',
+];

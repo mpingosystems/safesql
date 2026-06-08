@@ -244,7 +244,16 @@ function semanticValue(name: string, type: string, rng: Rng): unknown {
   if (name.includes('phone') || name.includes('mobile') || name === 'tel') {
     return `+1${rng.int(2000000000, 9999999999)}`;
   }
-  if (name === 'status' || name.endsWith('_status') || name.includes('state')) {
+  // Geographic state BEFORE the status check. A "status" column never contains
+  // the substring "state", so this only reroutes genuine state / state_code
+  // columns (which previously fell into the status enum, returning "pending").
+  if (name.includes('state') && name.includes('code')) {
+    return rng.pick(STATE_CODES);
+  }
+  if (name.includes('state') && !name.includes('status')) {
+    return rng.pick(US_STATES);
+  }
+  if (name === 'status' || name.endsWith('_status')) {
     return rng.pick(STATUSES);
   }
   if (
@@ -305,6 +314,25 @@ const COUNTRY_CODES: readonly string[] = [
 ];
 const CITIES: readonly string[] = [
   'Austin', 'London', 'Toronto', 'Berlin', 'Paris', 'Tokyo', 'Madrid', 'Lagos', 'Mumbai', 'Sydney',
+];
+const US_STATES: readonly string[] = [
+  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California',
+  'Colorado', 'Connecticut', 'Delaware', 'Florida', 'Georgia',
+  'Hawaii', 'Idaho', 'Illinois', 'Indiana', 'Iowa', 'Kansas',
+  'Kentucky', 'Louisiana', 'Maine', 'Maryland', 'Massachusetts',
+  'Michigan', 'Minnesota', 'Mississippi', 'Missouri', 'Montana',
+  'Nebraska', 'Nevada', 'New Hampshire', 'New Jersey', 'New Mexico',
+  'New York', 'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma',
+  'Oregon', 'Pennsylvania', 'Rhode Island', 'South Carolina',
+  'South Dakota', 'Tennessee', 'Texas', 'Utah', 'Vermont',
+  'Virginia', 'Washington', 'West Virginia', 'Wisconsin', 'Wyoming',
+];
+const STATE_CODES: readonly string[] = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+  'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+  'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+  'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+  'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
 ];
 const STREET_NAMES: readonly string[] = [
   'Oak', 'Maple', 'Cedar', 'Pine', 'Elm', 'Washington', 'Lincoln', 'Park', 'Lake', 'Hill',

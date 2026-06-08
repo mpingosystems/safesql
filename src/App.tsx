@@ -9,10 +9,11 @@ import { ApprovalInboxPage } from './pages/ApprovalInbox';
 import { CompliancePage } from './pages/Compliance';
 import { AuditLogPage } from './pages/AuditLog';
 import { CustomRulesPage } from './pages/CustomRules';
+import { BlogPage } from './pages/Blog';
 
 type Route =
   | 'landing' | 'editor' | 'pricing' | 'share' | 'analytics' | 'settings'
-  | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules';
+  | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules' | 'blog';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -25,6 +26,7 @@ function routeFromLocation(): Route {
   if (h.startsWith('/team/audit')) return 'team-audit';
   if (h.startsWith('/team/rules')) return 'team-rules';
   if (h.startsWith('/compliance')) return 'compliance';
+  if (h.startsWith('/blog')) return 'blog';
   if (h.startsWith('/analytics')) return 'analytics';
   if (h.startsWith('/settings')) return 'settings';
   if (h.startsWith('/pricing')) return 'pricing';
@@ -66,6 +68,8 @@ function App() {
       return <CompliancePage />;
     case 'team-rules':
       return <CustomRulesPage />;
+    case 'blog':
+      return <BlogPage />;
     default:
       return <LandingPage />;
   }

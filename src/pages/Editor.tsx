@@ -220,6 +220,7 @@ export function EditorPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <a href="#/analytics" style={navLink}>Analytics</a>
+          <a href="#/blog" style={navLink}>Blog</a>
           <a href="#/pricing" style={navLink}>Pricing</a>
           <AuthControls />
         </div>

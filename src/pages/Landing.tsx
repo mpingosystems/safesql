@@ -6,6 +6,7 @@ import { parseDDL } from '../services/schemaParser';
 import { validateSQL } from '../services/sqlValidator';
 import { startCheckoutForPlan, type Plan } from '../services/stripe';
 import { AuthControls } from '../components/AuthControls';
+import { useAppUser } from '../hooks/useAppUser';
 
 const DEMO_SQL = `SELECT u.id, u.email, SUM(o.amount) AS total_revenue
 FROM users u
@@ -195,6 +196,7 @@ function StepCard({ num, title, body }: { num: number; title: string; body: stri
 }
 
 function PricingSection() {
+  const { appUser } = useAppUser();
   const [cadence, setCadence] = useState<'monthly' | 'annual'>('monthly');
   const [busyPlan, setBusyPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -202,7 +204,10 @@ function PricingSection() {
   const handleUpgrade = async (plan: Plan) => {
     setBusyPlan(plan);
     setError(null);
-    const result = await startCheckoutForPlan(plan, cadence);
+    const result = await startCheckoutForPlan(plan, cadence, {
+      clientReferenceId: appUser?.clerkUserId,
+      customerEmail: appUser?.email,
+    });
     setBusyPlan(null);
     if (!result.ok) setError(result.message ?? 'Checkout failed.');
   };

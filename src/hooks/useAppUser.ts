@@ -7,6 +7,10 @@ export type Plan = 'free' | 'pro' | 'team' | 'business';
 
 export interface AppUser {
   id: string;
+  // The Clerk user id (auth subject). Distinct from `id`, which is the Supabase
+  // users.id. Stripe checkout/portal map to the user via this, since the users
+  // table is keyed on clerk_user_id.
+  clerkUserId: string;
   email: string;
   plan: Plan;
   stripe_customer_id: string | null;
@@ -49,6 +53,7 @@ function useAppUserAuth(): UseAppUserResult {
       // and the editor stays usable. No row is created in Supabase.
       setAppUser({
         id: user.id,
+        clerkUserId: user.id,
         email: user.primaryEmailAddress?.emailAddress ?? '',
         plan: 'free',
         stripe_customer_id: null,
@@ -81,7 +86,7 @@ function useAppUserAuth(): UseAppUserResult {
         .single();
 
       if (upsertRes.error) throw new Error(upsertRes.error.message);
-      setAppUser(upsertRes.data as AppUser);
+      setAppUser({ ...(upsertRes.data as AppUser), clerkUserId: user.id });
     } catch (e) {
       setError((e as Error).message);
       setAppUser(null);

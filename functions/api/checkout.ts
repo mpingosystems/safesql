@@ -41,8 +41,10 @@ const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promis
   params.set('mode', 'subscription');
   params.set('line_items[0][price]', priceId);
   params.set('line_items[0][quantity]', '1');
-  params.set('success_url', `${base}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`);
-  params.set('cancel_url', `${base}/#/pricing?checkout=cancelled`);
+  // Hash-routed SPA: the route is read from the URL hash, so land on
+  // #/settings (success banner reads ?checkout=success from the hash query).
+  params.set('success_url', `${base}/#/settings?checkout=success&session_id={CHECKOUT_SESSION_ID}`);
+  params.set('cancel_url', `${base}/#/pricing`);
   params.set('allow_promotion_codes', 'true');
   params.set('billing_address_collection', 'auto');
 

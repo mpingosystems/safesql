@@ -29,6 +29,43 @@ export function SettingsPage() {
   const [busy, setBusy] = useState(false);
   const [badgeStats, setBadgeStats] = useState({ count: 0, avg: 0, destructive: 0 });
 
+  // Sprint 10 — post-checkout success banner + billing portal.
+  const [showCheckoutSuccess, setShowCheckoutSuccess] = useState(false);
+  const [portalBusy, setPortalBusy] = useState(false);
+
+  useEffect(() => {
+    // ?checkout=success may arrive in the hash query (#/settings?checkout=success)
+    // or the search string. Show the banner, strip the param, auto-dismiss in 5s.
+    const inHash = /[?&]checkout=success/.test(window.location.hash);
+    const inSearch = /[?&]checkout=success/.test(window.location.search);
+    if (!inHash && !inSearch) return;
+    setShowCheckoutSuccess(true);
+    try {
+      window.history.replaceState(null, '', '#/settings');
+    } catch {
+      /* ignore */
+    }
+    const id = setTimeout(() => setShowCheckoutSuccess(false), 5000);
+    return () => clearTimeout(id);
+  }, []);
+
+  const openPortal = async () => {
+    if (!appUser?.clerkUserId || portalBusy) return;
+    setPortalBusy(true);
+    try {
+      const res = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clerkUserId: appUser.clerkUserId }),
+      });
+      const data = (await res.json()) as { url?: string };
+      if (data.url) window.location.href = data.url;
+      else setPortalBusy(false);
+    } catch {
+      setPortalBusy(false);
+    }
+  };
+
   useEffect(() => {
     if (!appUser?.id || !isSupabaseConfigured) return;
     const supabase = getSupabase();
@@ -225,7 +262,32 @@ export function SettingsPage() {
 
   return (
     <Shell>
+      {showCheckoutSuccess && (
+        <div
+          role="status"
+          onClick={() => setShowCheckoutSuccess(false)}
+          style={{ background: '#052e16', border: '1px solid #16a34a', color: '#bbf7d0', borderRadius: 8, padding: '12px 14px', marginBottom: 16, cursor: 'pointer', fontSize: 13.5 }}
+        >
+          🎉 Welcome to SafeSQL Pro {appUser ? cap(appUser.plan) : ''}! Your account has been upgraded. (click to dismiss)
+        </div>
+      )}
       <h1 style={{ fontSize: 22, marginBottom: 4 }}>Settings</h1>
+
+      {/* Billing */}
+      <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 20 }}>Billing</h2>
+      <div style={card}>
+        <p style={{ color: '#a1a1aa', fontSize: 13, marginTop: 0 }}>
+          Current plan: <strong style={{ color: '#e4e4e7' }}>{appUser ? cap(appUser.plan) : '—'}</strong>
+        </p>
+        {isPro ? (
+          <button type="button" onClick={() => void openPortal()} disabled={portalBusy} style={primaryBtn}>
+            {portalBusy ? 'Opening…' : 'Manage subscription'}
+          </button>
+        ) : (
+          <a href="#/pricing" style={{ ...primaryBtn, textDecoration: 'none', display: 'inline-block' }}>Upgrade →</a>
+        )}
+      </div>
+
       <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 20 }}>API Keys</h2>
 
       {!isPro ? (
@@ -431,3 +493,7 @@ const td: React.CSSProperties = { padding: '8px 10px', borderBottom: '1px solid 
 const tdMuted: React.CSSProperties = { padding: 12, color: '#52525b' };
 const inputStyle: React.CSSProperties = { width: '100%', background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 5, padding: '7px 10px', fontSize: 12.5 };
 const dialectBadge: React.CSSProperties = { display: 'inline-block', padding: '1px 8px', borderRadius: 999, border: '1px solid #3f3f46', color: '#a1a1aa', fontSize: 11 };
+
+function cap(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}

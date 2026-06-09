@@ -1,23 +1,18 @@
+import { STRIPE_PRICES } from '../config/stripe';
+
 export type Plan = 'pro' | 'team' | 'business';
 export type Cadence = 'monthly' | 'annual';
 
-const PRICE_IDS: Record<Plan, Record<Cadence, string | undefined>> = {
-  pro: {
-    monthly: import.meta.env.VITE_STRIPE_PRO_MONTHLY_PRICE_ID,
-    annual: import.meta.env.VITE_STRIPE_PRO_ANNUAL_PRICE_ID,
-  },
-  team: {
-    monthly: import.meta.env.VITE_STRIPE_TEAM_MONTHLY_PRICE_ID,
-    annual: import.meta.env.VITE_STRIPE_TEAM_ANNUAL_PRICE_ID,
-  },
-  business: {
-    monthly: import.meta.env.VITE_STRIPE_BUSINESS_MONTHLY_PRICE_ID,
-    annual: import.meta.env.VITE_STRIPE_BUSINESS_ANNUAL_PRICE_ID,
-  },
-};
-
 export function getPriceId(plan: Plan, cadence: Cadence = 'monthly'): string | null {
-  return PRICE_IDS[plan][cadence] || null;
+  return (STRIPE_PRICES[plan][cadence] as string | undefined) || null;
+}
+
+// Identity passed to the checkout session so the webhook can map the resulting
+// subscription back to the user. clientReferenceId MUST be the Clerk user id
+// (the users table is keyed on clerk_user_id).
+export interface CheckoutIdentity {
+  clientReferenceId?: string;
+  customerEmail?: string;
 }
 
 export interface CheckoutResult {
@@ -26,13 +21,13 @@ export interface CheckoutResult {
   message?: string;
 }
 
-export async function startCheckout(priceId: string): Promise<CheckoutResult> {
+export async function startCheckout(priceId: string, identity: CheckoutIdentity = {}): Promise<CheckoutResult> {
   if (!priceId) {
     return {
       ok: false,
       reason: 'missing-price-id',
       message:
-        'Price ID not configured. Add the appropriate VITE_STRIPE_*_PRICE_ID to .env.local after creating prices in your Stripe dashboard.',
+        'Price ID not configured. Add the appropriate VITE_STRIPE_* price env var in Cloudflare Pages after creating prices in your Stripe dashboard.',
     };
   }
 
@@ -43,7 +38,11 @@ export async function startCheckout(priceId: string): Promise<CheckoutResult> {
     res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ priceId }),
+      body: JSON.stringify({
+        priceId,
+        clientReferenceId: identity.clientReferenceId,
+        customerEmail: identity.customerEmail,
+      }),
     });
   } catch {
     return {
@@ -71,14 +70,18 @@ export async function startCheckout(priceId: string): Promise<CheckoutResult> {
   return { ok: true };
 }
 
-export async function startCheckoutForPlan(plan: Plan, cadence: Cadence = 'monthly'): Promise<CheckoutResult> {
+export async function startCheckoutForPlan(
+  plan: Plan,
+  cadence: Cadence = 'monthly',
+  identity: CheckoutIdentity = {},
+): Promise<CheckoutResult> {
   const priceId = getPriceId(plan, cadence);
   if (!priceId) {
     return {
       ok: false,
       reason: 'missing-price-id',
-      message: `No price ID configured for ${plan} (${cadence}). Set VITE_STRIPE_${plan.toUpperCase()}_${cadence.toUpperCase()}_PRICE_ID in .env.local.`,
+      message: `No price ID configured for ${plan} (${cadence}). Set VITE_STRIPE_${plan.toUpperCase()}_${cadence.toUpperCase()} in Cloudflare Pages env.`,
     };
   }
-  return startCheckout(priceId);
+  return startCheckout(priceId, identity);
 }

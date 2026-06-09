@@ -1,10 +1,7 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { getSupabase } from './supabaseClient';
-
-// Sprint 10 Part 2 — weekly/daily SQL health digest. The compute + render layer
-// is pure (no import.meta.env, no fetch) so it runs identically in the browser,
-// the Cloudflare Worker, and unit tests. The Worker (functions/api/digest/send.ts)
-// fetches rows and calls these.
+// Sprint 10 Part 2 — weekly/daily SQL health digest. This module is the pure
+// compute + render + send layer: NO import.meta.env and NO supabaseClient import,
+// so it bundles cleanly into the Cloudflare Worker (functions/api/digest/send.ts).
+// Browser-only, Supabase-coupled preference helpers live in ./emailPreferences.
 
 export interface DigestRecord {
   risk_score: number;
@@ -129,40 +126,4 @@ export async function sendDigestEmail(
     }),
   });
   return { sent: true };
-}
-
-// Browser-side: read/write the current user's digest preference row.
-export interface EmailPreference {
-  user_id: string;
-  digest_frequency: DigestFrequency;
-  digest_day: number;
-  digest_hour: number;
-  last_sent_at: string | null;
-}
-
-export async function getEmailPreference(
-  clerkUserId: string,
-  client: SupabaseClient | null = getSupabase(),
-): Promise<EmailPreference | null> {
-  if (!client || !clerkUserId) return null;
-  const { data } = await client
-    .from('email_preferences')
-    .select('user_id, digest_frequency, digest_day, digest_hour, last_sent_at')
-    .eq('user_id', clerkUserId)
-    .maybeSingle();
-  return (data as EmailPreference) ?? null;
-}
-
-export async function saveEmailPreference(
-  pref: { user_id: string; digest_frequency: DigestFrequency; digest_day?: number },
-  client: SupabaseClient | null = getSupabase(),
-): Promise<boolean> {
-  if (!client || !pref.user_id) return false;
-  const { error } = await client
-    .from('email_preferences')
-    .upsert(
-      { user_id: pref.user_id, digest_frequency: pref.digest_frequency, digest_day: pref.digest_day ?? 1 },
-      { onConflict: 'user_id' },
-    );
-  return !error;
 }

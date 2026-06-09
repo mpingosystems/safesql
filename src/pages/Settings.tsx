@@ -9,7 +9,8 @@ import {
 import { computeBadgeCriteria } from '../services/badge';
 import { listSchemaConnections, type SchemaConnectionSummary } from '../services/schemaConnections';
 import { SUPPORTED_DIALECTS } from '../services/schemaConnector';
-import { getEmailPreference, saveEmailPreference, type DigestFrequency } from '../services/digest';
+import type { DigestFrequency } from '../services/digest';
+import { getEmailPreference, saveEmailPreference } from '../services/emailPreferences';
 import { SITE_URL } from '../config/constants';
 
 interface ApiKeyRow {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { LandingPage } from './pages/Landing';
+import { LandingPage, PricingSection } from './pages/Landing';
 import { EditorPage } from './pages/Editor';
 import { ShareViewPage } from './pages/ShareView';
 import { AnalyticsPage } from './pages/Analytics';
@@ -119,23 +119,11 @@ function App() {
 
 function PricingStub() {
   return (
-    <div
-      style={{
-        background: '#09090b',
-        color: '#e4e4e7',
-        minHeight: '100vh',
-        padding: '60px 32px',
-        textAlign: 'center',
-      }}
-    >
-      <a href="#/" style={{ color: '#a78bfa', textDecoration: 'none', fontSize: 13 }}>
-        ← Back to home
-      </a>
-      <h1 style={{ fontSize: 36, marginTop: 30 }}>Pricing</h1>
-      <p style={{ color: '#a1a1aa', marginTop: 16 }}>
-        See pricing on the <a href="#/" style={{ color: '#a78bfa' }}>landing page</a>.
-        Stripe checkout coming in Step 14.
-      </p>
+    <div style={{ background: '#09090b', color: '#e4e4e7', minHeight: '100vh', padding: '24px 0' }}>
+      <div style={{ padding: '0 32px' }}>
+        <a href="#/" style={{ color: '#a78bfa', textDecoration: 'none', fontSize: 13 }}>← Back to home</a>
+      </div>
+      <PricingSection />
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { validateSQL } from '../services/sqlValidator';
 import { startCheckoutForPlan, type Plan } from '../services/stripe';
 import { AuthControls } from '../components/AuthControls';
 import { useAppUser } from '../hooks/useAppUser';
+import { ROICalculator, type RecommendedTier } from '../components/ROICalculator';
 
 const DEMO_SQL = `SELECT u.id, u.email, SUM(o.amount) AS total_revenue
 FROM users u
@@ -195,11 +196,12 @@ function StepCard({ num, title, body }: { num: number; title: string; body: stri
   );
 }
 
-function PricingSection() {
+export function PricingSection() {
   const { appUser } = useAppUser();
   const [cadence, setCadence] = useState<'monthly' | 'annual'>('monthly');
   const [busyPlan, setBusyPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recommended, setRecommended] = useState<RecommendedTier | null>(null);
 
   const handleUpgrade = async (plan: Plan) => {
     setBusyPlan(plan);
@@ -258,6 +260,7 @@ function PricingSection() {
           cta={busyPlan === 'pro' ? 'Loading…' : 'Upgrade to Pro'}
           onUpgrade={() => void handleUpgrade('pro')}
           disabled={busyPlan !== null}
+          recommended={recommended === 'pro'}
         />
         <PricingCard
           tier="Team"
@@ -267,6 +270,7 @@ function PricingSection() {
           cta={busyPlan === 'team' ? 'Loading…' : 'Start team trial'}
           onUpgrade={() => void handleUpgrade('team')}
           disabled={busyPlan !== null}
+          recommended={recommended === 'team'}
         />
         <PricingCard
           tier="Business"
@@ -276,6 +280,7 @@ function PricingSection() {
           cta={busyPlan === 'business' ? 'Loading…' : 'Contact sales'}
           onUpgrade={() => void handleUpgrade('business')}
           disabled={busyPlan !== null}
+          recommended={recommended === 'business'}
         />
       </div>
       {error && (
@@ -295,6 +300,8 @@ function PricingSection() {
           {error}
         </div>
       )}
+
+      <ROICalculator onRecommend={setRecommended} />
     </section>
   );
 }
@@ -309,6 +316,7 @@ interface PricingCardProps {
   onUpgrade?: () => void;
   highlight?: boolean;
   disabled?: boolean;
+  recommended?: boolean;
 }
 
 function PricingCard(props: PricingCardProps) {
@@ -316,10 +324,28 @@ function PricingCard(props: PricingCardProps) {
     <div
       style={{
         ...card,
-        border: props.highlight ? '1px solid #7c3aed' : '1px solid #27272a',
+        border: props.highlight || props.recommended ? '1px solid #7c3aed' : '1px solid #27272a',
         position: 'relative',
       }}
     >
+      {props.recommended && (
+        <span
+          style={{
+            position: 'absolute',
+            top: -10,
+            right: 16,
+            background: '#16a34a',
+            color: 'white',
+            fontSize: 10,
+            fontWeight: 700,
+            padding: '3px 8px',
+            borderRadius: 4,
+            letterSpacing: 0.5,
+          }}
+        >
+          RECOMMENDED FOR YOUR TEAM
+        </span>
+      )}
       {props.highlight && (
         <span
           style={{

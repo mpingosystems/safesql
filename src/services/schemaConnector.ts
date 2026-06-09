@@ -9,9 +9,9 @@ import type { SchemaDefinition, SchemaColumn } from '../types/validation';
 
 export type ConnectorDialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
 
-// Only PostgreSQL is live in v1; the rest are gated behind "Coming soon" so the
-// UI/Function degrade gracefully instead of crashing.
-export const SUPPORTED_DIALECTS: ConnectorDialect[] = ['postgresql'];
+// PostgreSQL, BigQuery and Snowflake are live (Sprint 9 + Sprint 10). MySQL is
+// still gated behind "Coming soon" so the UI/Function degrade gracefully.
+export const SUPPORTED_DIALECTS: ConnectorDialect[] = ['postgresql', 'bigquery', 'snowflake'];
 
 export function isDialectSupported(dialect: string): dialect is ConnectorDialect {
   return (SUPPORTED_DIALECTS as string[]).includes(dialect);
@@ -184,3 +184,121 @@ export const POSTGRES_INFORMATION_SCHEMA_QUERY = `
     AND t.table_type = 'BASE TABLE'
   ORDER BY t.table_name, c.ordinal_position;
 `.trim();
+
+// ── BigQuery (Sprint 10) ─────────────────────────────────────────────────────
+// INFORMATION_SCHEMA.COLUMNS rows. BigQuery has no PK/FK metadata in this view,
+// so isPK/isFK are always false; partitioning columns are noted but not special.
+export interface BigQueryColumnRow {
+  table_name: string;
+  column_name: string;
+  data_type: string;
+  is_nullable: string; // 'YES' | 'NO'
+  is_partitioning_column?: string | null; // 'YES' | 'NO'
+}
+
+export function parseBigQueryColumns(rows: BigQueryColumnRow[]): SchemaDefinition {
+  return groupColumns(
+    rows.map((r) => ({
+      table: r.table_name,
+      column: r.column_name,
+      type: normalizeType(r.data_type),
+      nullable: String(r.is_nullable).toUpperCase() === 'YES',
+    })),
+  );
+}
+
+export const BIGQUERY_INFORMATION_SCHEMA_QUERY = (projectId: string, datasetId: string): string =>
+  `SELECT table_name, column_name, data_type, is_nullable, is_partitioning_column
+   FROM \`${projectId}.${datasetId}.INFORMATION_SCHEMA.COLUMNS\`
+   ORDER BY table_name, ordinal_position;`;
+
+// ── Snowflake (Sprint 10) ────────────────────────────────────────────────────
+// Snowflake returns UPPERCASE column names from INFORMATION_SCHEMA.
+export interface SnowflakeColumnRow {
+  TABLE_NAME: string;
+  COLUMN_NAME: string;
+  DATA_TYPE: string;
+  IS_NULLABLE: string; // 'YES' | 'NO'
+  COLUMN_DEFAULT?: string | null;
+}
+
+export function parseSnowflakeColumns(rows: SnowflakeColumnRow[]): SchemaDefinition {
+  return groupColumns(
+    rows.map((r) => ({
+      table: r.TABLE_NAME,
+      column: r.COLUMN_NAME,
+      type: normalizeType(r.DATA_TYPE),
+      nullable: String(r.IS_NULLABLE).toUpperCase() === 'YES',
+    })),
+  );
+}
+
+export const SNOWFLAKE_INFORMATION_SCHEMA_QUERY = (database: string, schema: string): string =>
+  `SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT
+   FROM ${database}.INFORMATION_SCHEMA.COLUMNS
+   WHERE TABLE_SCHEMA = '${schema}'
+   ORDER BY TABLE_NAME, ORDINAL_POSITION;`;
+
+// Shared grouping for the dialects that expose only flat (table, column) rows.
+interface FlatColumn {
+  table: string;
+  column: string;
+  type: string;
+  nullable: boolean;
+}
+
+function groupColumns(rows: FlatColumn[]): SchemaDefinition {
+  const tables = new Map<string, SchemaColumn[]>();
+  for (const r of rows) {
+    if (!r.table || !r.column) continue;
+    if (!tables.has(r.table)) tables.set(r.table, []);
+    tables.get(r.table)!.push({ name: r.column, type: r.type, nullable: r.nullable, isPK: false, isFK: false });
+  }
+  return { tables: [...tables.entries()].map(([name, columns]) => ({ name, columns })) };
+}
+
+// ── BigQuery service-account JWT (RS256) ─────────────────────────────────────
+// Builds the signed assertion exchanged for an OAuth2 access token. Web Crypto
+// (Node/vitest + Workers). nowSec is injected so it's deterministic in tests.
+export interface BigQueryCredentials {
+  client_email: string;
+  private_key: string; // PEM (PKCS#8)
+}
+
+function b64urlFromString(s: string): string {
+  return b64encode(new TextEncoder().encode(s)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlFromBytes(bytes: Uint8Array): string {
+  return b64encode(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function pemToPkcs8(pem: string): Uint8Array {
+  const body = pem
+    .replace(/-----BEGIN [^-]+-----/g, '')
+    .replace(/-----END [^-]+-----/g, '')
+    .replace(/\s+/g, '');
+  return b64decode(body);
+}
+
+export async function createBigQueryJWT(creds: BigQueryCredentials, nowSec: number): Promise<string> {
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const claims = {
+    iss: creds.client_email,
+    scope: 'https://www.googleapis.com/auth/bigquery.readonly',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: nowSec,
+    exp: nowSec + 3600,
+  };
+  const signingInput = `${b64urlFromString(JSON.stringify(header))}.${b64urlFromString(JSON.stringify(claims))}`;
+  const key = await crypto.subtle.importKey(
+    'pkcs8',
+    pemToPkcs8(creds.private_key) as BufferSource,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = new Uint8Array(
+    await crypto.subtle.sign('RSASSA-PKCS1-v1_5', key, new TextEncoder().encode(signingInput) as BufferSource),
+  );
+  return `${signingInput}.${b64urlFromBytes(sig)}`;
+}

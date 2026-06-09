@@ -1,13 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Env } from '../../_shared';
 import { hashApiKey } from '../../../src/services/apiKeys';
-import {
-  decryptConfig,
-  isDialectSupported,
-  parseInformationSchema,
-  POSTGRES_INFORMATION_SCHEMA_QUERY,
-  type InformationSchemaRow,
-} from '../../../src/services/schemaConnector';
+import { decryptConfig, isDialectSupported } from '../../../src/services/schemaConnector';
+import { fetchBigQuerySchema } from './bigquery';
+import { fetchSnowflakeSchema } from './snowflake';
 import type { SchemaDefinition } from '../../../src/types/validation';
 
 // Sprint 9 Part 2 — POST /api/schema/sync. Connects (read-only) to a stored
@@ -50,9 +46,10 @@ export interface ConnectionRow {
 export interface SchemaSyncDeps {
   authenticate(token: string | null): Promise<{ ok: boolean; userId?: string; plan?: string }>;
   getConnection(id: string, userId: string): Promise<ConnectionRow | null>;
-  // Run the INFORMATION_SCHEMA query against the (decrypted) connection string;
-  // returns raw rows. Throws on connection failure.
-  runPostgresQuery(connectionString: string, query: string): Promise<InformationSchemaRow[]>;
+  // Introspect the schema for a dialect from its (decrypted) config. Throws on
+  // connection failure. PostgreSQL config is a connection string; BigQuery and
+  // Snowflake configs are JSON blobs.
+  fetchSchema(dialect: string, config: string): Promise<SchemaDefinition>;
   saveCache(id: string, schema: SchemaDefinition): Promise<void>;
   decrypt(payload: string): Promise<string>;
 }
@@ -83,21 +80,20 @@ export async function handleSchemaSync(request: Request, deps: SchemaSyncDeps): 
     return jsonRes({ error: `${conn.dialect} connector is coming soon. PostgreSQL is supported today.` }, 400);
   }
 
-  let connectionString: string;
+  let config: string;
   try {
-    connectionString = await deps.decrypt(conn.encrypted_config);
+    config = await deps.decrypt(conn.encrypted_config);
   } catch {
     return jsonRes({ error: 'Could not decrypt connection config' }, 500);
   }
 
-  let rows: InformationSchemaRow[];
+  let schema: SchemaDefinition;
   try {
-    rows = await deps.runPostgresQuery(connectionString, POSTGRES_INFORMATION_SCHEMA_QUERY);
+    schema = await deps.fetchSchema(conn.dialect, config);
   } catch (e) {
     return jsonRes({ error: `Connection failed: ${(e as Error).message}` }, 502);
   }
 
-  const schema = parseInformationSchema(rows);
   if (body.test !== true) {
     await deps.saveCache(conn.id, schema);
   }
@@ -132,12 +128,13 @@ export const onRequestPost = async (context: { request: Request; env: SchemaEnv 
         .maybeSingle();
       return (data as ConnectionRow) ?? null;
     },
-    async runPostgresQuery(connectionString, query) {
-      // Production Postgres connectivity from a Worker requires a Hyperdrive
-      // binding + a TCP-capable driver. When that's provisioned, swap this body
-      // for the driver call. Until then we fail clearly rather than silently.
-      void connectionString;
-      void query;
+    async fetchSchema(dialect, config) {
+      if (dialect === 'bigquery') return fetchBigQuerySchema(JSON.parse(config));
+      if (dialect === 'snowflake') return fetchSnowflakeSchema(JSON.parse(config));
+      // PostgreSQL: live TCP connectivity from a Worker needs a Hyperdrive binding
+      // + a driver. Until that's provisioned we fail clearly. (BigQuery/Snowflake
+      // go over HTTPS, so they work today without Hyperdrive.)
+      void config;
       throw new Error('Postgres driver not provisioned (attach a Hyperdrive binding to enable live sync)');
     },
     async saveCache(id, schema) {

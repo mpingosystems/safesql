@@ -105,14 +105,44 @@ export function SettingsPage() {
   const [connApiKey, setConnApiKey] = useState('');
   const [connMsg, setConnMsg] = useState<string | null>(null);
   const [connTested, setConnTested] = useState(false);
+  // Sprint 10 — dialect-specific config fields (BigQuery / Snowflake).
+  const [bq, setBq] = useState({ project_id: '', dataset_id: '', credentials_json: '' });
+  const [sf, setSf] = useState({ account: '', username: '', password: '', warehouse: '', database: '', schema: 'PUBLIC' });
 
-  // Test before save. Live TCP connectivity from the browser isn't possible, so
-  // this validates the connection-string format (the encrypt + live introspection
-  // happens server-side on Save/Sync). Gates the Save button.
+  const onDialectChange = (d: string) => {
+    setConnDialect(d);
+    setConnTested(false);
+    setConnMsg(null);
+  };
+
+  // Build the `connection_string` payload for the chosen dialect. PostgreSQL is a
+  // raw connection string; BigQuery/Snowflake are JSON config blobs (encrypted
+  // whole, server-side).
+  const buildConnConfig = (): string | null => {
+    if (connDialect === 'postgresql') return connString.trim() || null;
+    if (connDialect === 'bigquery') {
+      if (!bq.project_id || !bq.dataset_id || !bq.credentials_json) return null;
+      return JSON.stringify({ type: 'bigquery', ...bq });
+    }
+    if (connDialect === 'snowflake') {
+      if (!sf.account || !sf.username || !sf.password || !sf.database) return null;
+      return JSON.stringify({ type: 'snowflake', ...sf });
+    }
+    return null;
+  };
+
+  // Test before save. Real connectivity happens server-side on Save/Sync; this
+  // validates that the dialect-specific fields are well-formed and gates Save.
   const testConnection = () => {
-    const ok = /^postgres(ql)?:\/\/.+@.+\/.+/.test(connString.trim());
+    let ok = false;
+    if (connDialect === 'postgresql') ok = /^postgres(ql)?:\/\/.+@.+\/.+/.test(connString.trim());
+    else if (connDialect === 'bigquery') {
+      ok = !!bq.project_id && !!bq.dataset_id && isJson(bq.credentials_json);
+    } else if (connDialect === 'snowflake') {
+      ok = !!sf.account && !!sf.username && !!sf.password && !!sf.database;
+    }
     setConnTested(ok);
-    setConnMsg(ok ? '✅ Connection string looks valid — Save to encrypt & sync.' : '❌ Failed — expected postgresql://user:pass@host:5432/db');
+    setConnMsg(ok ? '✅ Config looks valid — Save to encrypt & sync.' : '❌ Failed — fill in all required fields (valid JSON for BigQuery credentials).');
   };
 
   const refreshConnections = useCallback(async () => {
@@ -132,8 +162,9 @@ export function SettingsPage() {
   }, [refreshConnections]);
 
   const addConnection = async () => {
-    if (!connName.trim() || !connString.trim() || !connApiKey.trim()) {
-      setConnMsg('Name, connection string and an API key are all required.');
+    const config = buildConnConfig();
+    if (!connName.trim() || !config || !connApiKey.trim()) {
+      setConnMsg('Name, connection config and an API key are all required.');
       return;
     }
     setConnMsg('Saving…');
@@ -141,7 +172,7 @@ export function SettingsPage() {
       const res = await fetch('/api/schema/connections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${connApiKey.trim()}` },
-        body: JSON.stringify({ name: connName, dialect: connDialect, connection_string: connString }),
+        body: JSON.stringify({ name: connName, dialect: connDialect, connection_string: config }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -402,10 +433,10 @@ export function SettingsPage() {
       ) : (
         <div style={card}>
           <p style={{ color: '#a1a1aa', fontSize: 12.5, marginTop: 0 }}>
-            Auto-import your schema from a read-only connection. The connection string is
-            AES-256 encrypted server-side — never stored in plaintext.{' '}
-            <strong style={{ color: '#d4d4d8' }}>PostgreSQL</strong> is supported today; MySQL, BigQuery
-            and Snowflake are coming soon.
+            Auto-import your schema from a read-only connection. Credentials are AES-256 encrypted
+            server-side — never stored in plaintext.{' '}
+            <strong style={{ color: '#d4d4d8' }}>PostgreSQL, BigQuery and Snowflake</strong> are
+            supported; MySQL is coming soon.
           </p>
 
           {connections.length > 0 && (
@@ -430,15 +461,36 @@ export function SettingsPage() {
 
           <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
             <input value={connName} onChange={(e) => setConnName(e.target.value)} placeholder="Display name (e.g. Production DB)" style={inputStyle} />
-            <div style={{ display: 'flex', gap: 8 }}>
-              <select value={connDialect} onChange={(e) => setConnDialect(e.target.value)} style={{ ...inputStyle, flex: '0 0 160px' }} title="PostgreSQL only in v1 — other dialects coming soon">
-                {SUPPORTED_DIALECTS.map((d) => <option key={d} value={d}>{d}</option>)}
-                <option value="mysql" disabled>mysql (coming soon)</option>
-                <option value="bigquery" disabled>bigquery (coming soon)</option>
-                <option value="snowflake" disabled>snowflake (coming soon)</option>
-              </select>
-              <input type="password" value={connString} onChange={(e) => { setConnString(e.target.value); setConnTested(false); }} placeholder="postgresql://user:pw@host:5432/db" style={{ ...inputStyle, flex: 1 }} />
-            </div>
+            <select value={connDialect} onChange={(e) => onDialectChange(e.target.value)} style={{ ...inputStyle, flex: '0 0 160px' }}>
+              {SUPPORTED_DIALECTS.map((d) => <option key={d} value={d}>{d}</option>)}
+              <option value="mysql" disabled>mysql (coming soon)</option>
+            </select>
+
+            {connDialect === 'postgresql' && (
+              <input type="password" value={connString} onChange={(e) => { setConnString(e.target.value); setConnTested(false); }} placeholder="postgresql://user:pw@host:5432/db" style={inputStyle} />
+            )}
+            {connDialect === 'bigquery' && (
+              <>
+                <input value={bq.project_id} onChange={(e) => { setBq({ ...bq, project_id: e.target.value }); setConnTested(false); }} placeholder="GCP project id" style={inputStyle} />
+                <input value={bq.dataset_id} onChange={(e) => { setBq({ ...bq, dataset_id: e.target.value }); setConnTested(false); }} placeholder="Dataset id (e.g. analytics)" style={inputStyle} />
+                <textarea value={bq.credentials_json} onChange={(e) => { setBq({ ...bq, credentials_json: e.target.value }); setConnTested(false); }} placeholder='Service-account credentials JSON {"client_email": "...", "private_key": "..."}' style={{ ...inputStyle, minHeight: 70, fontFamily: 'monospace' }} />
+              </>
+            )}
+            {connDialect === 'snowflake' && (
+              <>
+                <input value={sf.account} onChange={(e) => { setSf({ ...sf, account: e.target.value }); setConnTested(false); }} placeholder="Account (e.g. xy12345.us-east-1)" style={inputStyle} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input value={sf.username} onChange={(e) => { setSf({ ...sf, username: e.target.value }); setConnTested(false); }} placeholder="Username" style={{ ...inputStyle, flex: 1 }} />
+                  <input type="password" value={sf.password} onChange={(e) => { setSf({ ...sf, password: e.target.value }); setConnTested(false); }} placeholder="Password" style={{ ...inputStyle, flex: 1 }} />
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input value={sf.warehouse} onChange={(e) => { setSf({ ...sf, warehouse: e.target.value }); setConnTested(false); }} placeholder="Warehouse" style={{ ...inputStyle, flex: 1 }} />
+                  <input value={sf.database} onChange={(e) => { setSf({ ...sf, database: e.target.value }); setConnTested(false); }} placeholder="Database" style={{ ...inputStyle, flex: 1 }} />
+                  <input value={sf.schema} onChange={(e) => { setSf({ ...sf, schema: e.target.value }); setConnTested(false); }} placeholder="Schema" style={{ ...inputStyle, flex: 1 }} />
+                </div>
+              </>
+            )}
+
             <input type="password" value={connApiKey} onChange={(e) => setConnApiKey(e.target.value)} placeholder="Your API key (ssk_live_…) — used to encrypt + sync" style={inputStyle} />
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <button type="button" onClick={testConnection} style={{ ...revokeBtn, color: '#a78bfa' }}>Test connection</button>
@@ -571,4 +623,13 @@ const dialectBadge: React.CSSProperties = { display: 'inline-block', padding: '1
 
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function isJson(s: string): boolean {
+  try {
+    JSON.parse(s);
+    return true;
+  } catch {
+    return false;
+  }
 }

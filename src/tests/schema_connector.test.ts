@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createBigQueryJWT,
   decryptConfig,
   encryptConfig,
   generateEncryptionKey,
   isDialectSupported,
+  parseBigQueryColumns,
   parseInformationSchema,
+  parseSnowflakeColumns,
+  type BigQueryColumnRow,
   type InformationSchemaRow,
+  type SnowflakeColumnRow,
 } from '../services/schemaConnector';
 
 describe('encryptConfig / decryptConfig', () => {
@@ -38,13 +43,13 @@ describe('encryptConfig / decryptConfig', () => {
 });
 
 describe('isDialectSupported', () => {
-  it('postgresql is supported in v1', () => {
+  it('postgresql, bigquery and snowflake are supported', () => {
     expect(isDialectSupported('postgresql')).toBe(true);
+    expect(isDialectSupported('bigquery')).toBe(true);
+    expect(isDialectSupported('snowflake')).toBe(true);
   });
-  it('mysql / bigquery / snowflake are not yet', () => {
+  it('mysql is still coming soon', () => {
     expect(isDialectSupported('mysql')).toBe(false);
-    expect(isDialectSupported('bigquery')).toBe(false);
-    expect(isDialectSupported('snowflake')).toBe(false);
   });
 });
 
@@ -103,5 +108,60 @@ describe('parseInformationSchema', () => {
   it('ignores rows without table/column names', () => {
     const schema = parseInformationSchema([{ table_name: '', column_name: '', data_type: 'text', is_nullable: 'YES' }]);
     expect(schema.tables.length).toBe(0);
+  });
+});
+
+describe('parseBigQueryColumns', () => {
+  it('converts INFORMATION_SCHEMA rows to a SchemaDefinition', () => {
+    const rows: BigQueryColumnRow[] = [
+      { table_name: 'events', column_name: 'id', data_type: 'INT64', is_nullable: 'NO' },
+      { table_name: 'events', column_name: 'user_id', data_type: 'STRING', is_nullable: 'YES', is_partitioning_column: 'NO' },
+      { table_name: 'sessions', column_name: 'id', data_type: 'INT64', is_nullable: 'NO' },
+    ];
+    const schema = parseBigQueryColumns(rows);
+    expect(schema.tables.map((t) => t.name).sort()).toEqual(['events', 'sessions']);
+    const events = schema.tables.find((t) => t.name === 'events')!;
+    expect(events.columns.map((c) => c.name)).toEqual(['id', 'user_id']);
+    expect(events.columns.find((c) => c.name === 'user_id')!.nullable).toBe(true);
+    // No PK/FK metadata available from BigQuery COLUMNS view.
+    expect(events.columns.every((c) => !c.isPK && !c.isFK)).toBe(true);
+  });
+});
+
+describe('parseSnowflakeColumns', () => {
+  it('converts UPPERCASE INFORMATION_SCHEMA rows to a SchemaDefinition', () => {
+    const rows: SnowflakeColumnRow[] = [
+      { TABLE_NAME: 'ORDERS', COLUMN_NAME: 'ID', DATA_TYPE: 'NUMBER', IS_NULLABLE: 'NO' },
+      { TABLE_NAME: 'ORDERS', COLUMN_NAME: 'TOTAL', DATA_TYPE: 'NUMBER', IS_NULLABLE: 'YES', COLUMN_DEFAULT: null },
+    ];
+    const schema = parseSnowflakeColumns(rows);
+    expect(schema.tables.length).toBe(1);
+    expect(schema.tables[0].name).toBe('ORDERS');
+    expect(schema.tables[0].columns.map((c) => c.name)).toEqual(['ID', 'TOTAL']);
+    expect(schema.tables[0].columns.find((c) => c.name === 'TOTAL')!.nullable).toBe(true);
+  });
+});
+
+describe('createBigQueryJWT', () => {
+  it('produces a 3-segment RS256 JWT (mock service-account key)', async () => {
+    // Generate a throwaway RSA key and export it to PKCS#8 PEM (the mock key).
+    const pair = await crypto.subtle.generateKey(
+      { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+      true,
+      ['sign', 'verify'],
+    );
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+    let b64 = '';
+    for (const x of pkcs8) b64 += String.fromCharCode(x);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${btoa(b64)}\n-----END PRIVATE KEY-----`;
+
+    const jwt = await createBigQueryJWT({ client_email: 'svc@proj.iam.gserviceaccount.com', private_key: pem }, 1_700_000_000);
+    const segments = jwt.split('.');
+    expect(segments.length).toBe(3);
+    const header = JSON.parse(atob(segments[0].replace(/-/g, '+').replace(/_/g, '/')));
+    expect(header).toMatchObject({ alg: 'RS256', typ: 'JWT' });
+    const claims = JSON.parse(atob(segments[1].replace(/-/g, '+').replace(/_/g, '/')));
+    expect(claims.iss).toBe('svc@proj.iam.gserviceaccount.com');
+    expect(claims.exp - claims.iat).toBe(3600);
   });
 });

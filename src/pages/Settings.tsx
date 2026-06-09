@@ -9,6 +9,7 @@ import {
 import { computeBadgeCriteria } from '../services/badge';
 import { listSchemaConnections, type SchemaConnectionSummary } from '../services/schemaConnections';
 import { SUPPORTED_DIALECTS } from '../services/schemaConnector';
+import { getEmailPreference, saveEmailPreference, type DigestFrequency } from '../services/digest';
 import { SITE_URL } from '../config/constants';
 
 interface ApiKeyRow {
@@ -174,6 +175,47 @@ export function SettingsPage() {
       await refreshConnections();
     } catch {
       setConnMsg('Network error');
+    }
+  };
+
+  // ── Email digest (Sprint 10) ───────────────────────────────────────────────
+  const [digestFreq, setDigestFreq] = useState<DigestFrequency>('weekly');
+  const [digestDay, setDigestDay] = useState(1);
+  const [lastSent, setLastSent] = useState<string | null>(null);
+  const [digestMsg, setDigestMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!appUser?.clerkUserId) return;
+    void getEmailPreference(appUser.clerkUserId).then((p) => {
+      if (p) {
+        setDigestFreq(p.digest_frequency);
+        setDigestDay(p.digest_day ?? 1);
+        setLastSent(p.last_sent_at);
+      }
+    });
+  }, [appUser?.clerkUserId]);
+
+  const saveDigest = async (freq: DigestFrequency, day: number) => {
+    if (!appUser?.clerkUserId) return;
+    setDigestFreq(freq);
+    setDigestDay(day);
+    const ok = await saveEmailPreference({ user_id: appUser.clerkUserId, digest_frequency: freq, digest_day: day });
+    setDigestMsg(ok ? '✓ Saved' : 'Save failed (migration applied?)');
+  };
+
+  const sendTestDigest = async () => {
+    if (!appUser?.clerkUserId) return;
+    setDigestMsg('Sending…');
+    try {
+      const res = await fetch('/api/digest/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ test: true, clerkUserId: appUser.clerkUserId }),
+      });
+      const data = (await res.json()) as { sent?: boolean; reason?: string };
+      setDigestMsg(data.sent ? '✓ Test digest sent' : `Computed, not emailed (${data.reason ?? 'no RESEND key'})`);
+    } catch {
+      setDigestMsg('Network error');
     }
   };
 
@@ -409,6 +451,39 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Email notifications (digest) */}
+      <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Email notifications</h2>
+      <div style={card}>
+        <p style={{ color: '#a1a1aa', fontSize: 12.5, marginTop: 0 }}>
+          Get a SQL health digest by email — validations, errors caught, top issues, and your score trend.
+        </p>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <label style={{ fontSize: 12, color: '#a1a1aa' }}>
+            Frequency:{' '}
+            <select value={digestFreq} onChange={(e) => void saveDigest(e.target.value as DigestFrequency, digestDay)} style={{ background: '#18181b', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="never">Never</option>
+            </select>
+          </label>
+          {digestFreq === 'weekly' && (
+            <label style={{ fontSize: 12, color: '#a1a1aa' }}>
+              Day:{' '}
+              <select value={digestDay} onChange={(e) => void saveDigest(digestFreq, Number(e.target.value))} style={{ background: '#18181b', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 4, padding: '4px 8px', fontSize: 12 }}>
+                {['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => (
+                  <option key={d} value={i}>{d}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button type="button" onClick={() => void sendTestDigest()} disabled={digestFreq === 'never'} style={{ ...revokeBtn, color: '#a78bfa' }}>Send test digest</button>
+          {digestMsg && <span style={{ fontSize: 12, color: digestMsg.startsWith('✓') ? '#22c55e' : '#f59e0b' }}>{digestMsg}</span>}
+        </div>
+        <div style={{ fontSize: 11.5, color: '#71717a', marginTop: 8 }}>
+          Last sent: {lastSent ? new Date(lastSent).toLocaleString() : 'Never sent yet'}
+        </div>
+      </div>
 
       {/* Notifications */}
       <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Notifications</h2>

@@ -56,7 +56,7 @@ export function SettingsPage() {
     destructiveExecuted: badgeStats.destructive,
   });
   const badgeMarkdown = appUser
-    ? `![SafeSQL Certified](${SITE_URL}/api/badge/${appUser.id})`
+    ? `![SafeSQL Pro Certified](${SITE_URL}/api/badge/${appUser.id})`
     : '';
 
   // ── Schema Connections (Sprint 9) ──────────────────────────────────────────
@@ -358,7 +358,7 @@ export function SettingsPage() {
       <div style={card}>
         {appUser ? (
           <>
-            <img src={`${SITE_URL}/api/badge/${appUser.id}`} alt="SafeSQL Certified badge" style={{ maxWidth: 320 }} />
+            <img src={`${SITE_URL}/api/badge/${appUser.id}`} alt="SafeSQL Pro Certified badge" style={{ maxWidth: 320 }} />
             <div style={{ marginTop: 10 }}>
               <div style={{ fontSize: 12, color: '#a1a1aa', marginBottom: 4 }}>Embed in your README:</div>
               <code style={keyBox}>{badgeMarkdown}</code>
@@ -382,7 +382,7 @@ export function SettingsPage() {
             </div>
           </>
         ) : (
-          <p style={{ color: '#71717a', fontSize: 13 }}>Sign in to see your SafeSQL Certified badge.</p>
+          <p style={{ color: '#71717a', fontSize: 13 }}>Sign in to see your SafeSQL Pro Certified badge.</p>
         )}
       </div>
     </Shell>

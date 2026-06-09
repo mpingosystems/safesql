@@ -42,7 +42,7 @@ export interface BadgeRenderOpts {
 // A flat two-line SVG badge. Green when certified, grey otherwise.
 export function renderBadgeSvg(opts: BadgeRenderOpts): string {
   const accent = opts.certified ? '#16a34a' : '#52525b';
-  const title = opts.certified ? '✓ SafeSQL Certified' : 'SafeSQL — Not yet certified';
+  const title = opts.certified ? '✓ SafeSQL Pro Certified' : 'SafeSQL Pro — Not yet certified';
   const sub = opts.certified
     ? `Validated ${opts.count} queries · avg ${opts.avgScore} · ${opts.date}`
     : `${opts.count} validations · avg ${opts.avgScore} · keep going`;

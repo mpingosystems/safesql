@@ -27,7 +27,7 @@ describe('renderBadgeSvg', () => {
   it('green certified badge contains the certified text + counts', () => {
     const svg = renderBadgeSvg({ count: 142, avgScore: 88, certified: true, date: '2026-06-08' });
     expect(svg).toMatch(/<svg/);
-    expect(svg).toMatch(/SafeSQL Certified/);
+    expect(svg).toMatch(/SafeSQL Pro Certified/);
     expect(svg).toMatch(/142/);
     expect(svg).toMatch(/#16a34a/); // green
   });

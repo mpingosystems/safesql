@@ -27,7 +27,7 @@ describe('buildSlackPayload', () => {
     const types = (p.blocks as { type: string }[]).map((b) => b.type);
     expect(types).toEqual(['header', 'section', 'section', 'actions']);
     const header = p.blocks[0] as { text: { text: string } };
-    expect(header.text.text).toMatch(/SafeSQL caught a risky query/);
+    expect(header.text.text).toMatch(/SafeSQL Pro caught a risky query/);
     const action = p.blocks[3] as { elements: { url: string }[] };
     expect(action.elements[0].url).toMatch(/\/v\/abc123def456/);
   });

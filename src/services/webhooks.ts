@@ -49,7 +49,7 @@ export function buildSlackPayload(report: ValidationReport, opts: SlackPayloadOp
   const blocks: unknown[] = [
     {
       type: 'header',
-      text: { type: 'plain_text', text: '⚠️ SafeSQL caught a risky query' },
+      text: { type: 'plain_text', text: '⚠️ SafeSQL Pro caught a risky query' },
     },
     {
       type: 'section',

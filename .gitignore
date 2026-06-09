@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Production env (VITE_ keys baked into the build) — NEVER commit live keys
+.env.production
+.env.production.local
+
 # Sprint working backups (created during in-progress edits, not for commit)
 *.sprint*-baseline
 

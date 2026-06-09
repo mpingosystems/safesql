@@ -12,9 +12,19 @@ interface CheckoutBody {
 
 // onRequest catches every method so non-POST requests land on a clean
 // 405 instead of falling through to the SPA's static-asset catch-all.
+// The try/catch turns any unexpected Worker crash (which Cloudflare would
+// surface as a raw 502) into a readable 500 that shows up in Functions logs.
 export const onRequest: PagesFunction<Env> = async (context) => {
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
-  return onRequestPost(context);
+  try {
+    return await onRequestPost(context);
+  } catch (err) {
+    console.error('Checkout error:', (err as Error)?.message ?? err);
+    return new Response(JSON.stringify({ error: 'Checkout unavailable' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 };
 
 const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promise<Response> => {

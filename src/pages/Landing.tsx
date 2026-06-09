@@ -160,6 +160,14 @@ export function LandingPage() {
 
       <footer style={{ borderTop: '1px solid #27272a', padding: '24px 32px', color: '#52525b', fontSize: 12 }}>
         © 2026 Mpingo Systems LLC · Built on RealityDB synthetic data
+        {' · '}
+        <a href="#/privacy" style={{ color: '#71717a', textDecoration: 'none' }}>Privacy Policy</a>
+        {' · '}
+        <a href="#/terms" style={{ color: '#71717a', textDecoration: 'none' }}>Terms of Service</a>
+        {' · '}
+        <a href="#/security" style={{ color: '#71717a', textDecoration: 'none' }}>Security</a>
+        {' · '}
+        <a href="#/dpa" style={{ color: '#71717a', textDecoration: 'none' }}>DPA</a>
       </footer>
     </div>
   );

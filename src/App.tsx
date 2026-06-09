@@ -15,11 +15,17 @@ import { TeamMembersPage } from './pages/TeamMembers';
 import { JoinTeamPage } from './pages/JoinTeam';
 import { QueryLibraryPage } from './pages/QueryLibrary';
 import { LaunchPage } from './pages/LaunchPage';
+import { PrivacyPage } from './pages/Privacy';
+import { TermsPage } from './pages/Terms';
+import { SecurityPage } from './pages/Security';
+import { DPAPage } from './pages/DPA';
+import { SubProcessorsPage } from './pages/SubProcessors';
 
 type Route =
   | 'landing' | 'editor' | 'pricing' | 'share' | 'analytics' | 'settings'
   | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules' | 'blog'
-  | 'team-setup' | 'team-members' | 'team-join' | 'library' | 'launch';
+  | 'team-setup' | 'team-members' | 'team-join' | 'library' | 'launch'
+  | 'privacy' | 'terms' | 'security' | 'dpa' | 'sub-processors';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -36,6 +42,11 @@ function routeFromLocation(): Route {
   if (h.startsWith('/team/setup')) return 'team-setup';
   if (h.startsWith('/library')) return 'library';
   if (h.startsWith('/launch')) return 'launch';
+  if (h.startsWith('/privacy')) return 'privacy';
+  if (h.startsWith('/terms')) return 'terms';
+  if (h.startsWith('/security')) return 'security';
+  if (h.startsWith('/sub-processors')) return 'sub-processors';
+  if (h.startsWith('/dpa')) return 'dpa';
   if (h.startsWith('/compliance')) return 'compliance';
   if (h.startsWith('/blog')) return 'blog';
   if (h.startsWith('/analytics')) return 'analytics';
@@ -89,6 +100,16 @@ function App() {
       return <QueryLibraryPage />;
     case 'launch':
       return <LaunchPage />;
+    case 'privacy':
+      return <PrivacyPage />;
+    case 'terms':
+      return <TermsPage />;
+    case 'security':
+      return <SecurityPage />;
+    case 'dpa':
+      return <DPAPage />;
+    case 'sub-processors':
+      return <SubProcessorsPage />;
     case 'blog':
       return <BlogPage />;
     default:

@@ -20,6 +20,9 @@ interface ValidationReportProps {
   dialect?: string;
   isPro?: boolean;
   onApplyFix?: (issue: ValidationIssue) => void;
+  // Sprint 10 — when supplied (editor, team users), a risky query (<70) can be
+  // sent to the team's approval inbox. Omitted in read-only share view.
+  onRequestApproval?: () => void;
 }
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -42,6 +45,7 @@ export function ValidationReport({
   dialect,
   isPro = false,
   onApplyFix,
+  onRequestApproval,
 }: ValidationReportProps) {
   const [tab, setTab] = useState<Tab>('errors');
   const [copied, setCopied] = useState(false);
@@ -230,6 +234,15 @@ export function ValidationReport({
             style={{ ...actionBtn, background: '#27272a', color: '#e4e4e7' }}
           >
             Execute with Warnings
+          </button>
+        )}
+        {onRequestApproval && report.errors.length === 0 && report.riskScore < 70 && (
+          <button
+            type="button"
+            onClick={onRequestApproval}
+            style={{ ...actionBtn, background: 'transparent', color: '#a78bfa', border: '1px solid #7c3aed', marginTop: 8 }}
+          >
+            Request Approval
           </button>
         )}
         <div style={{ fontSize: 11, color: '#71717a', textAlign: 'center', marginTop: 8 }}>

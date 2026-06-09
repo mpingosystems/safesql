@@ -23,6 +23,9 @@ export interface ApprovalRow {
   approver_note: string | null;
   created_at: string;
   resolved_at: string | null;
+  // The full ValidationReport captured at request time (used by the inbox to
+  // expand the "View full report" panel without re-running validation).
+  validation_report?: ValidationReport | null;
 }
 
 export interface CreateApprovalInput {
@@ -92,5 +95,20 @@ export async function getPendingRequests(
     .eq('team_id', teamId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
+  return (data as ApprovalRow[]) ?? [];
+}
+
+// Resolved (approved/rejected) requests for the History tab, newest first.
+export async function getResolvedRequests(
+  teamId: string,
+  client: SupabaseClient | null = getSupabase(),
+): Promise<ApprovalRow[]> {
+  if (!client) return [];
+  const { data } = await client
+    .from('approval_requests')
+    .select('*')
+    .eq('team_id', teamId)
+    .in('status', ['approved', 'rejected'])
+    .order('resolved_at', { ascending: false });
   return (data as ApprovalRow[]) ?? [];
 }

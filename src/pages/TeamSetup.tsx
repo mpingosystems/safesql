@@ -22,7 +22,7 @@ export function TeamSetupPage() {
     setMsg(null);
     try {
       const t = await createTeam(name, appUser.id, appUser.email, getSupabase());
-      if (!t) { setMsg('Could not create team (is the teams migration applied?).'); return; }
+      if (!t) { setMsg('That team name may be taken, or the teams migration isn’t applied yet. Try another name.'); return; }
       await refresh();
       window.location.hash = '#/team/members';
     } finally {
@@ -36,7 +36,7 @@ export function TeamSetupPage() {
     setMsg(null);
     try {
       const res = await acceptInvitation(token.trim(), appUser.id, appUser.email, getSupabase());
-      if (!res) { setMsg('Invitation not found or expired.'); return; }
+      if (!res) { setMsg('That invitation token is invalid or has expired. Ask your team manager for a new invite.'); return; }
       await refresh();
       window.location.hash = '#/team/analytics';
     } finally {
@@ -47,6 +47,11 @@ export function TeamSetupPage() {
   return (
     <Shell>
       <h1 style={{ fontSize: 22 }}>Set up your team</h1>
+      {appUser && (
+        <p style={{ color: '#71717a', fontSize: 12.5, marginTop: 2 }}>
+          Signed in as <span style={{ color: '#a1a1aa' }}>{appUser.email}</span>
+        </p>
+      )}
       {!isTeam ? (
         <p style={{ color: '#a1a1aa' }}>Teams are a Team-plan feature. <a href="#/pricing" style={{ color: '#a78bfa' }}>Upgrade →</a></p>
       ) : team ? (

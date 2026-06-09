@@ -17,6 +17,8 @@ import { persistValidation } from '../services/persistValidation';
 import { applyFix } from '../services/applyFix';
 import { AuthControls } from '../components/AuthControls';
 import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
+import { useTeam } from '../hooks/useTeam';
+import { createApprovalRequest } from '../services/approvals';
 
 type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
 
@@ -102,8 +104,32 @@ export function EditorPage() {
   const [clearSignal, setClearSignal] = useState(0);
 
   const { appUser, refresh: refreshAppUser } = useAppUser();
+  const { team } = useTeam();
   const overLimit = isOverValidationLimit(appUser);
   const isPro = !!appUser && appUser.plan !== 'free';
+
+  // Sprint 10 — request approval for a risky query (team users only).
+  const [approvalOpen, setApprovalOpen] = useState(false);
+  const [approvalNote, setApprovalNote] = useState('');
+  const [approvalMsg, setApprovalMsg] = useState<string | null>(null);
+
+  const submitApproval = useCallback(async () => {
+    if (!appUser?.id || !report) return;
+    const res = await createApprovalRequest({
+      teamId: team?.id ?? appUser.id,
+      requesterId: appUser.email || appUser.id,
+      sql,
+      ddl,
+      dialect,
+      report,
+      note: approvalNote.trim() || undefined,
+    });
+    setApprovalMsg(res ? '✓ Approval request sent to your team.' : 'Could not send request (is the migration applied?).');
+    if (res) {
+      setApprovalNote('');
+      setTimeout(() => { setApprovalOpen(false); setApprovalMsg(null); }, 1200);
+    }
+  }, [appUser, report, team?.id, sql, ddl, dialect, approvalNote]);
 
   const runValidation = useCallback(async () => {
     if (overLimit) return; // hard block when free-tier limit reached
@@ -405,6 +431,7 @@ export function EditorPage() {
           dialect={dialect}
           isPro={isPro}
           onApplyFix={handleApplyFix}
+          onRequestApproval={team ? () => { setApprovalMsg(null); setApprovalOpen(true); } : undefined}
         />
       </aside>
 
@@ -448,6 +475,34 @@ export function EditorPage() {
           AI explanations: {aiEnabled ? 'on' : 'off'}
         </label>
       </footer>
+
+      {approvalOpen && (
+        <div
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}
+          onClick={() => setApprovalOpen(false)}
+        >
+          <div
+            style={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 10, padding: 18, width: 420, maxWidth: '92vw' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>Request approval</div>
+            <p style={{ color: '#a1a1aa', fontSize: 12.5, marginTop: 0 }}>
+              This query scored {report?.riskScore}. Send it to your team's approval inbox with an optional note.
+            </p>
+            <textarea
+              value={approvalNote}
+              onChange={(e) => setApprovalNote(e.target.value)}
+              placeholder="Why this query needs to run despite the warnings…"
+              style={{ width: '100%', minHeight: 70, background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 6, padding: 8, fontSize: 12.5 }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', marginTop: 10 }}>
+              {approvalMsg && <span style={{ fontSize: 12, color: approvalMsg.startsWith('✓') ? '#22c55e' : '#f59e0b', marginRight: 'auto' }}>{approvalMsg}</span>}
+              <button type="button" onClick={() => setApprovalOpen(false)} style={{ background: 'transparent', color: '#a1a1aa', border: '1px solid #3f3f46', borderRadius: 5, padding: '6px 14px', fontSize: 12.5, cursor: 'pointer' }}>Cancel</button>
+              <button type="button" onClick={() => void submitApproval()} style={{ background: '#7c3aed', color: 'white', border: 'none', borderRadius: 5, padding: '6px 14px', fontWeight: 600, fontSize: 12.5, cursor: 'pointer' }}>Submit request</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

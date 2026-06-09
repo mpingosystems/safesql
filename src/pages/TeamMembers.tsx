@@ -15,6 +15,8 @@ export function TeamMembersPage() {
   const [email, setEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<TeamRole>('member');
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteMsg, setInviteMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [pendingRemove, setPendingRemove] = useState<{ id: string; email: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
   if (!team) {
@@ -28,15 +30,25 @@ export function TeamMembersPage() {
 
   const invite = async () => {
     if (!appUser || !email.trim() || busy) return;
+    const target = email.trim().toLowerCase();
+    // Guard: already a member.
+    if (members.some((m) => m.email.toLowerCase() === target)) {
+      setInviteMsg({ text: 'User is already a member of this team.', ok: false });
+      return;
+    }
     setBusy(true);
     setInviteLink(null);
+    setInviteMsg(null);
     try {
       const token = await inviteMember(team.id, email, inviteRole, appUser.id, getSupabase());
       if (token) {
         setInviteLink(`${SITE_URL}/team/join?token=${token}`);
+        setInviteMsg({ text: `Invitation sent to ${target}. Share the link below to let them join.`, ok: true });
         setEmail('');
         // Email delivery (Resend) is best-effort and wired separately; the link
         // above is sufficient to join in the meantime.
+      } else {
+        setInviteMsg({ text: 'Could not create the invitation. Is the teams migration applied?', ok: false });
       }
     } finally {
       setBusy(false);
@@ -48,8 +60,10 @@ export function TeamMembersPage() {
     await refresh();
   };
 
-  const remove = async (clerkUserId: string) => {
-    await removeMember(team.id, clerkUserId, getSupabase());
+  const confirmRemove = async () => {
+    if (!pendingRemove) return;
+    await removeMember(team.id, pendingRemove.id, getSupabase());
+    setPendingRemove(null);
     await refresh();
   };
 
@@ -72,18 +86,40 @@ export function TeamMembersPage() {
                     <option value="owner">owner</option>
                   </select>
                 ) : (
-                  <span style={{ color: m.role === 'owner' ? '#a78bfa' : '#a1a1aa' }}>{m.role}</span>
+                  <RoleBadge role={m.role} />
                 )}
               </td>
               <td style={td}>
                 {isManager && m.clerk_user_id !== appUser?.id && m.role !== 'owner' && (
-                  <button type="button" onClick={() => void remove(m.clerk_user_id)} style={rm}>Remove</button>
+                  <button type="button" onClick={() => setPendingRemove({ id: m.clerk_user_id, email: m.email })} style={rm}>Remove</button>
                 )}
               </td>
             </tr>
           ))}
+          {members.length <= 1 && (
+            <tr>
+              <td colSpan={3} style={{ ...td, color: '#52525b' }}>
+                No other members yet.{isManager && ' Invite your team using the form below →'}
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
+
+      {pendingRemove && (
+        <div style={overlay} onClick={() => setPendingRemove(null)}>
+          <div style={dialog} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 6 }}>Remove member?</div>
+            <p style={{ color: '#a1a1aa', fontSize: 13, marginTop: 0 }}>
+              Remove <strong>{pendingRemove.email}</strong> from {team.name}? They'll lose access to team data.
+            </p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" onClick={() => setPendingRemove(null)} style={sel}>Cancel</button>
+              <button type="button" onClick={() => void confirmRemove()} style={rmSolid}>Remove</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isManager && (
         <div style={card}>
@@ -96,8 +132,11 @@ export function TeamMembersPage() {
             </select>
             <button type="button" onClick={() => void invite()} disabled={busy || !email.trim()} style={btn}>Invite</button>
           </div>
+          {inviteMsg && (
+            <div style={{ marginTop: 10, fontSize: 12.5, color: inviteMsg.ok ? '#22c55e' : '#f59e0b' }}>{inviteMsg.text}</div>
+          )}
           {inviteLink && (
-            <div style={{ marginTop: 10 }}>
+            <div style={{ marginTop: 8 }}>
               <div style={{ fontSize: 12, color: '#a1a1aa', marginBottom: 4 }}>Share this invitation link:</div>
               <code style={linkBox}>{inviteLink}</code>
             </div>
@@ -105,6 +144,16 @@ export function TeamMembersPage() {
         </div>
       )}
     </Shell>
+  );
+}
+
+function RoleBadge({ role }: { role: TeamRole }) {
+  const color = role === 'owner' ? '#a78bfa' : role === 'manager' ? '#22c55e' : '#a1a1aa';
+  const label = role.charAt(0).toUpperCase() + role.slice(1);
+  return (
+    <span style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 999, border: `1px solid ${color}`, color, fontSize: 11, fontWeight: 600 }}>
+      {label}
+    </span>
   );
 }
 
@@ -127,4 +176,7 @@ const inp: React.CSSProperties = { background: '#0a0a0a', color: '#e4e4e7', bord
 const sel: React.CSSProperties = { background: '#18181b', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 5, padding: '6px 8px', fontSize: 12.5 };
 const btn: React.CSSProperties = { background: '#7c3aed', color: 'white', border: 'none', borderRadius: 6, padding: '7px 14px', fontWeight: 600, fontSize: 13, cursor: 'pointer' };
 const rm: React.CSSProperties = { background: 'transparent', color: '#ef4444', border: '1px solid #3f3f46', borderRadius: 5, padding: '3px 10px', fontSize: 12, cursor: 'pointer' };
+const rmSolid: React.CSSProperties = { background: '#dc2626', color: 'white', border: 'none', borderRadius: 5, padding: '5px 14px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' };
 const linkBox: React.CSSProperties = { display: 'block', background: '#0a0a0a', border: '1px solid #27272a', borderRadius: 6, padding: 10, color: '#86efac', fontFamily: 'monospace', fontSize: 12, wordBreak: 'break-all' };
+const overlay: React.CSSProperties = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 };
+const dialog: React.CSSProperties = { background: '#18181b', border: '1px solid #3f3f46', borderRadius: 10, padding: 18, width: 360, maxWidth: '90vw' };

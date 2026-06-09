@@ -66,11 +66,28 @@ export function SettingsPage() {
   const [connString, setConnString] = useState('');
   const [connApiKey, setConnApiKey] = useState('');
   const [connMsg, setConnMsg] = useState<string | null>(null);
+  const [connTested, setConnTested] = useState(false);
+
+  // Test before save. Live TCP connectivity from the browser isn't possible, so
+  // this validates the connection-string format (the encrypt + live introspection
+  // happens server-side on Save/Sync). Gates the Save button.
+  const testConnection = () => {
+    const ok = /^postgres(ql)?:\/\/.+@.+\/.+/.test(connString.trim());
+    setConnTested(ok);
+    setConnMsg(ok ? '✅ Connection string looks valid — Save to encrypt & sync.' : '❌ Failed — expected postgresql://user:pass@host:5432/db');
+  };
 
   const refreshConnections = useCallback(async () => {
     if (!appUser?.id) return;
     setConnections(await listSchemaConnections(appUser.id));
   }, [appUser?.id]);
+
+  const deleteConnection = async (id: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+    await supabase.from('schema_connections').delete().eq('id', id);
+    await refreshConnections();
+  };
 
   useEffect(() => {
     void refreshConnections();
@@ -93,6 +110,7 @@ export function SettingsPage() {
         setConnMsg('✓ Connection saved');
         setConnName('');
         setConnString('');
+        setConnTested(false);
         await refreshConnections();
       } else {
         setConnMsg(data.error ?? 'Save failed');
@@ -293,11 +311,12 @@ export function SettingsPage() {
                 {connections.map((c) => (
                   <tr key={c.id}>
                     <td style={td}>{c.name}</td>
-                    <td style={td}>{c.dialect}</td>
-                    <td style={td}>{c.last_synced_at?.slice(0, 16).replace('T', ' ') ?? '—'}</td>
+                    <td style={td}><span style={dialectBadge}>{c.dialect}</span></td>
+                    <td style={td}>{c.last_synced_at?.slice(0, 16).replace('T', ' ') ?? 'never'}</td>
                     <td style={td}>
                       <button type="button" onClick={() => void syncConnection(c.id)} style={{ ...revokeBtn, color: '#a78bfa' }}>Sync now</button>
-                      <a href="#/editor" style={{ color: '#71717a', fontSize: 12, marginLeft: 8 }}>Use in editor →</a>
+                      <a href="#/editor" style={{ color: '#71717a', fontSize: 12, margin: '0 8px' }}>Use in editor →</a>
+                      <button type="button" onClick={() => void deleteConnection(c.id)} style={revokeBtn}>Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -308,18 +327,22 @@ export function SettingsPage() {
           <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
             <input value={connName} onChange={(e) => setConnName(e.target.value)} placeholder="Display name (e.g. Production DB)" style={inputStyle} />
             <div style={{ display: 'flex', gap: 8 }}>
-              <select value={connDialect} onChange={(e) => setConnDialect(e.target.value)} style={{ ...inputStyle, flex: '0 0 160px' }}>
+              <select value={connDialect} onChange={(e) => setConnDialect(e.target.value)} style={{ ...inputStyle, flex: '0 0 160px' }} title="PostgreSQL only in v1 — other dialects coming soon">
                 {SUPPORTED_DIALECTS.map((d) => <option key={d} value={d}>{d}</option>)}
-                <option value="mysql" disabled>mysql (soon)</option>
-                <option value="bigquery" disabled>bigquery (soon)</option>
-                <option value="snowflake" disabled>snowflake (soon)</option>
+                <option value="mysql" disabled>mysql (coming soon)</option>
+                <option value="bigquery" disabled>bigquery (coming soon)</option>
+                <option value="snowflake" disabled>snowflake (coming soon)</option>
               </select>
-              <input value={connString} onChange={(e) => setConnString(e.target.value)} placeholder="postgresql://user:pw@host:5432/db" style={{ ...inputStyle, flex: 1 }} />
+              <input type="password" value={connString} onChange={(e) => { setConnString(e.target.value); setConnTested(false); }} placeholder="postgresql://user:pw@host:5432/db" style={{ ...inputStyle, flex: 1 }} />
             </div>
-            <input value={connApiKey} onChange={(e) => setConnApiKey(e.target.value)} placeholder="Your API key (ssk_live_…) — used to encrypt + sync" style={inputStyle} />
+            <input type="password" value={connApiKey} onChange={(e) => setConnApiKey(e.target.value)} placeholder="Your API key (ssk_live_…) — used to encrypt + sync" style={inputStyle} />
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <button type="button" onClick={() => void addConnection()} style={primaryBtn}>Add connection</button>
-              {connMsg && <span style={{ fontSize: 12, color: connMsg.startsWith('✓') ? '#22c55e' : '#f59e0b' }}>{connMsg}</span>}
+              <button type="button" onClick={testConnection} style={{ ...revokeBtn, color: '#a78bfa' }}>Test connection</button>
+              <button type="button" onClick={() => void addConnection()} disabled={!connTested} style={{ ...primaryBtn, opacity: connTested ? 1 : 0.5, cursor: connTested ? 'pointer' : 'not-allowed' }}>Save</button>
+              {connMsg && <span style={{ fontSize: 12, color: /^(✓|✅)/.test(connMsg) ? '#22c55e' : '#f59e0b' }}>{connMsg}</span>}
+            </div>
+            <div style={{ fontSize: 11.5, color: '#71717a', display: 'flex', alignItems: 'center', gap: 6 }}>
+              🔒 Your connection string is encrypted with AES-256 before storage. We never read your table contents.
             </div>
           </div>
         </div>
@@ -407,3 +430,4 @@ const th: React.CSSProperties = { textAlign: 'left', padding: '8px 10px', color:
 const td: React.CSSProperties = { padding: '8px 10px', borderBottom: '1px solid #18181b', color: '#d4d4d8' };
 const tdMuted: React.CSSProperties = { padding: 12, color: '#52525b' };
 const inputStyle: React.CSSProperties = { width: '100%', background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 5, padding: '7px 10px', fontSize: 12.5 };
+const dialectBadge: React.CSSProperties = { display: 'inline-block', padding: '1px 8px', borderRadius: 999, border: '1px solid #3f3f46', color: '#a1a1aa', fontSize: 11 };

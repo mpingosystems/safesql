@@ -223,7 +223,7 @@ export function EditorPage() {
               letterSpacing: -0.3,
             }}
           >
-            SafeSQL
+            SafeSQL Pro
           </a>
           <span style={{ color: '#52525b', fontSize: 11 }}>v0.7.0</span>
           {appUser && (

@@ -97,7 +97,7 @@ export function ShareViewPage() {
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
         <h1 style={{ fontSize: 20, margin: 0 }}>Shared validation — view only</h1>
         <button type="button" onClick={openInSafeSQL} style={openBtn}>
-          Open in SafeSQL →
+          Open in SafeSQL Pro →
         </button>
       </div>
       <div style={{ color: '#71717a', fontSize: 12, marginTop: 4, display: 'flex', gap: 8 }}>
@@ -150,7 +150,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ background: '#09090b', color: '#e4e4e7', minHeight: '100vh', padding: '32px' }}>
       <a href="#/" style={{ color: '#a78bfa', textDecoration: 'none', fontSize: 13 }}>
-        ← SafeSQL
+        ← SafeSQL Pro
       </a>
       <div style={{ maxWidth: 1100, margin: '20px auto 0' }}>{children}</div>
     </div>

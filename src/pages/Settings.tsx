@@ -329,7 +329,7 @@ export function SettingsPage() {
       <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Notifications</h2>
       <div style={card}>
         <p style={{ color: '#a1a1aa', fontSize: 12.5, marginTop: 0 }}>
-          Get a Slack alert when SafeSQL catches a risky query.
+          Get a Slack alert when SafeSQL Pro catches a risky query.
         </p>
         <input
           type="url"

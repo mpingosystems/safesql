@@ -56,11 +56,11 @@ Traditional tooling is built around execution. Syntax linters catch malformed SQ
 
 AI-generated SQL fails *silently*. It runs, returns rows, and produces a plausible number. The exact signal everyone trusts — "no error" — is the signal that hides the bug.
 
-## SafeSQL is the validation layer under your AI
+## SafeSQL Pro is the validation layer under your AI
 
-SafeSQL is deterministic, pre-execution validation. It parses the query into an AST and runs 33 rule-based detectors — fan-out joins, hallucinated columns, LEFT-JOIN-in-WHERE, missing time filters, integer division, and more. The detection layer never guesses and never hallucinates: a rule either fires or it does not. AI is used only to *explain* findings in plain English, never to decide them.
+SafeSQL Pro is deterministic, pre-execution validation. It parses the query into an AST and runs 33+ semantic detectors — fan-out joins, hallucinated columns, LEFT-JOIN-in-WHERE, missing time filters, integer division, and more. The detection layer never guesses and never hallucinates: a rule either fires or it does not. AI is used only to *explain* findings in plain English, never to decide them.
 
-That makes it the natural safety net under Cursor and Copilot: the AI writes the SQL 4× faster, and SafeSQL confirms it is actually correct before it runs.
+That makes it the natural safety net under Cursor and Copilot: the AI writes the SQL 4× faster, and SafeSQL Pro confirms it is actually correct before it runs.
 
 ## Add it to your workflow in one line
 

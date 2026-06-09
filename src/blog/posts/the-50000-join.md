@@ -34,9 +34,9 @@ This is the dangerous part. The query is valid SQL. It executes without error. I
 
 Bad SQL that crashes is found in seconds. Bad SQL that returns *believable wrong numbers* lives in dashboards for months. Ours lived for six.
 
-## How SafeSQL would have caught it
+## How SafeSQL Pro would have caught it
 
-This is exactly the pattern SafeSQL's `AGGREGATE_OVER_FANOUT_JOIN` detector exists for. It parses the query into an AST, sees that both `orders` and `user_tags` join to `users` on the same key, and sees a `SUM` over a column from one of those child tables. It fires — before execution:
+This is exactly the pattern SafeSQL Pro's `AGGREGATE_OVER_FANOUT_JOIN` detector exists for. It parses the query into an AST, sees that both `orders` and `user_tags` join to `users` on the same key, and sees a `SUM` over a column from one of those child tables. It fires — before execution:
 
 > **AGGREGATE_OVER_FANOUT_JOIN** — Joining `user_tags` alongside `orders` duplicates each `orders` row once per matching `user_tags` row, so `SUM(o.total_amount)` is multiplied. Pre-aggregate orders before joining.
 

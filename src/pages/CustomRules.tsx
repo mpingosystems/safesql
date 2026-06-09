@@ -50,7 +50,7 @@ export function CustomRulesPage() {
   return (
     <Shell>
       <h1 style={{ fontSize: 22 }}>Custom Rules</h1>
-      <p style={{ color: '#a1a1aa', fontSize: 13 }}>Encode your team's SQL policy on top of the 33 built-in detectors.</p>
+      <p style={{ color: '#a1a1aa', fontSize: 13 }}>Encode your team's SQL policy on top of the 33+ semantic detectors.</p>
       <div style={card}>
         <Row label="Name"><input value={name} onChange={(e) => setName(e.target.value)} style={inp} placeholder="Tenant filter" /></Row>
         <Row label="Type">

@@ -41,7 +41,7 @@ export function LandingPage() {
       <nav style={navStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <a href="#/" style={{ fontWeight: 700, fontSize: 18, color: '#a78bfa', textDecoration: 'none' }}>
-            SafeSQL
+            SafeSQL Pro
           </a>
           <span style={{ fontSize: 11, color: '#52525b' }}>v0.1.0</span>
         </div>
@@ -99,7 +99,7 @@ export function LandingPage() {
         <p style={demoSubhead}>
           This query computes "total revenue per user." It runs without errors. It returns
           numbers that look reasonable. It's also wrong by 3-10x because of JOIN multiplication.
-          SafeSQL catches it before you do.
+          SafeSQL Pro catches it before you do.
         </p>
         <div style={demoGrid}>
           <div style={demoEditorWrap}>
@@ -140,9 +140,9 @@ export function LandingPage() {
       <section style={section}>
         <h2 style={h2}>How it works</h2>
         <div style={cardGrid}>
-          <StepCard num={1} title="Paste SQL + schema" body="Paste your query and DDL. SafeSQL parses both into an AST." />
-          <StepCard num={2} title="Analyze logic, not syntax" body="7 deterministic detectors find errors a linter misses: JOIN multiplication, missing WHERE, contradictory filters, and more." />
-          <StepCard num={3} title="Run on synthetic data" body="Need proof? Execute against RealityDB-generated synthetic data — see actual row counts before touching production." />
+          <StepCard num={1} title="Paste SQL + schema (or connect your database)" body="Paste your query and DDL — or connect directly to your PostgreSQL database. SafeSQL Pro parses both into an AST instantly." />
+          <StepCard num={2} title="Detect logic errors, not just syntax" body="33+ semantic detectors catch what linters miss: JOIN multiplication, fan-out aggregates, hallucinated AI columns, LEFT JOIN WHERE traps, missing time filters, and more. Zero false positives — rules fire deterministically, never guess." />
+          <StepCard num={3} title="Prove it with synthetic data" body="Not just warnings — proof. SafeSQL Pro runs your query on RealityDB synthetic data and shows actual row counts, inflated aggregates, and rejected columns before a single production row is touched." />
         </div>
       </section>
 
@@ -232,7 +232,7 @@ function PricingSection() {
           tier="Free"
           price="$0"
           period="forever"
-          features={['50 validations/mo', '5 sandbox runs', 'Basic detectors', 'No AI explanations']}
+          features={['50 validations/month', 'All 33+ detectors', 'Monaco editor sandbox']}
           cta="Start free"
           href="#/editor"
         />
@@ -241,7 +241,7 @@ function PricingSection() {
           price={monthly ? '$49' : '$470'}
           period={monthly ? 'per month' : 'per year'}
           highlight
-          features={['Unlimited validations', '100 sandbox runs', 'All 7 detectors', 'AI explanations + fixes', 'Catch Copilot/Cursor bugs']}
+          features={['Unlimited validations', 'AI explanations', 'Apply-fix button', 'Schema connections', 'Query library', 'Shareable permalinks']}
           cta={busyPlan === 'pro' ? 'Loading…' : 'Upgrade to Pro'}
           onUpgrade={() => void handleUpgrade('pro')}
           disabled={busyPlan !== null}
@@ -250,7 +250,7 @@ function PricingSection() {
           tier="Team"
           price={monthly ? '$199' : '$1,910'}
           period={monthly ? 'per month · 5 seats' : 'per year · 5 seats'}
-          features={['Everything in Pro', 'Shared schema library', 'Team validation history', 'Priority support']}
+          features={['Everything in Pro', '5 seats', 'Team analytics', 'Approval workflow', 'Shared query library', 'GitHub Action']}
           cta={busyPlan === 'team' ? 'Loading…' : 'Start team trial'}
           onUpgrade={() => void handleUpgrade('team')}
           disabled={busyPlan !== null}
@@ -259,7 +259,7 @@ function PricingSection() {
           tier="Business"
           price={monthly ? '$599' : '$5,750'}
           period={monthly ? 'per month · 20 seats' : 'per year · 20 seats'}
-          features={['Everything in Team', 'Custom rules', 'Audit log', 'Slack alerts', 'SLA']}
+          features={['Everything in Team', '20 seats', 'Audit log', 'Custom rules', 'CSV export', 'Slack alerts', 'SOC 2 alignment']}
           cta={busyPlan === 'business' ? 'Loading…' : 'Contact sales'}
           onUpgrade={() => void handleUpgrade('business')}
           disabled={busyPlan !== null}

@@ -19,7 +19,7 @@ function loadPGlite(): Promise<PGliteCtor> {
         // references a chunk hash that no longer exists on the server.
         if (/dynamically imported module|Failed to fetch|error loading|importing a module/i.test(msg)) {
           throw new Error(
-            'Could not load the sandbox engine. A new version of SafeSQL was likely just deployed — ' +
+            'Could not load the sandbox engine. A new version of SafeSQL Pro was likely just deployed — ' +
               'reload the page (Ctrl/Cmd+Shift+R) and run again.',
           );
         }

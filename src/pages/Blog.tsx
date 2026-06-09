@@ -28,7 +28,7 @@ export function BlogPage() {
 function PostList() {
   return (
     <Shell>
-      <h1 style={{ fontSize: 28, marginBottom: 4 }}>The SafeSQL Blog</h1>
+      <h1 style={{ fontSize: 28, marginBottom: 4 }}>The SafeSQL Pro Blog</h1>
       <p style={{ color: '#a1a1aa', marginTop: 0 }}>SQL correctness, fan-out joins, and the safety net under AI-generated SQL.</p>
       <div style={{ marginTop: 24 }}>
         {posts.map((p) => (
@@ -59,7 +59,7 @@ function PostView({ post }: { post: BlogPost }) {
       </div>
       <div style={{ marginTop: 24, background: 'linear-gradient(135deg,#1e1b4b,#0f0f10)', border: '1px solid #3f3f46', borderRadius: 8, padding: 20, textAlign: 'center' }}>
         <div style={{ fontSize: 16, fontWeight: 700 }}>Catch these bugs before they run.</div>
-        <a href="#/editor" style={{ display: 'inline-block', marginTop: 10, background: '#7c3aed', color: 'white', padding: '8px 18px', borderRadius: 6, textDecoration: 'none', fontWeight: 600, fontSize: 13 }}>Try SafeSQL free →</a>
+        <a href="#/editor" style={{ display: 'inline-block', marginTop: 10, background: '#7c3aed', color: 'white', padding: '8px 18px', borderRadius: 6, textDecoration: 'none', fontWeight: 600, fontSize: 13 }}>Try SafeSQL Pro free →</a>
       </div>
     </Shell>
   );
@@ -69,7 +69,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div style={{ background: '#09090b', color: '#e4e4e7', minHeight: '100vh', padding: 32 }}>
       <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-        <a href="#/" style={{ color: '#a78bfa', textDecoration: 'none' }}>SafeSQL</a>
+        <a href="#/" style={{ color: '#a78bfa', textDecoration: 'none' }}>SafeSQL Pro</a>
         <a href="#/editor" style={{ color: '#71717a', textDecoration: 'none' }}>Editor</a>
       </div>
       <div style={{ maxWidth: 720, margin: '20px auto 0' }}>{children}</div>

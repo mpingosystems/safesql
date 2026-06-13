@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useState, lazy, Suspense } from 'react';
 import type { SchemaDefinition, ValidationReport as Report } from '../types/validation';
-import { SqlEditor } from '../components/SqlEditor';
+// Lazy: the demo editor loads Monaco. Deferring it lets the landing page paint
+// and Clerk initialize before Monaco's chunk + CDN runtime are fetched.
+const SqlEditor = lazy(() => import('../components/SqlEditor').then((m) => ({ default: m.SqlEditor })));
 import { ValidationReport } from '../components/ValidationReport';
 import { parseDDL } from '../services/schemaParser';
 import { validateSQL } from '../services/sqlValidator';
@@ -107,14 +109,32 @@ export function LandingPage() {
           <div style={demoEditorWrap}>
             <div style={demoLabel}>SQL</div>
             <div style={{ height: 220, border: '1px solid #27272a', borderRadius: 6, overflow: 'hidden' }}>
-              <SqlEditor
-                value={demoSql}
-                onChange={setDemoSql}
-                onValidate={setDemoReport}
-                schema={DEMO_SCHEMA}
-                dialect="postgresql"
-                height="100%"
-              />
+              <Suspense
+                fallback={
+                  <div
+                    style={{
+                      height: '100%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#71717a',
+                      fontSize: 13,
+                      background: '#0a0a0a',
+                    }}
+                  >
+                    Loading editor…
+                  </div>
+                }
+              >
+                <SqlEditor
+                  value={demoSql}
+                  onChange={setDemoSql}
+                  onValidate={setDemoReport}
+                  schema={DEMO_SCHEMA}
+                  dialect="postgresql"
+                  height="100%"
+                />
+              </Suspense>
             </div>
             <div style={demoLabel}>Schema (parsed from DDL)</div>
             <pre style={demoSchemaBox}>

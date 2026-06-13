@@ -1,6 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { LandingPage, PricingSection } from './pages/Landing';
-import { EditorPage } from './pages/Editor';
+// Lazy: the editor page pulls in Monaco (@monaco-editor/react + CDN runtime).
+// Splitting it out keeps Monaco off the landing/pricing/legal routes so it
+// doesn't compete with Clerk initialization on first paint.
+const EditorPage = lazy(() => import('./pages/Editor').then((m) => ({ default: m.EditorPage })));
 import { ShareViewPage } from './pages/ShareView';
 import { AnalyticsPage } from './pages/Analytics';
 import { SettingsPage } from './pages/Settings';
@@ -71,7 +74,11 @@ function App() {
 
   switch (route) {
     case 'editor':
-      return <EditorPage />;
+      return (
+        <Suspense fallback={<RouteLoading label="Loading editor…" />}>
+          <EditorPage />
+        </Suspense>
+      );
     case 'pricing':
       return <PricingStub />;
     case 'share':
@@ -115,6 +122,24 @@ function App() {
     default:
       return <LandingPage />;
   }
+}
+
+function RouteLoading({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        background: '#09090b',
+        color: '#a1a1aa',
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontSize: 14,
+      }}
+    >
+      {label}
+    </div>
+  );
 }
 
 function PricingStub() {

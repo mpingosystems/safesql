@@ -12,6 +12,19 @@ interface ValRow {
   report?: { errors?: { id: string }[] } | null;
 }
 
+// Public badge is GET-only (embedded via <img>); a matching OPTIONS handler
+// keeps cross-origin fetch() callers happy. Origin stays '*' like the GET.
+export const onRequestOptions = (): Response =>
+  new Response(null, {
+    status: 204,
+    headers: {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'GET, OPTIONS',
+      'access-control-allow-headers': 'Content-Type',
+      'access-control-max-age': '86400',
+    },
+  });
+
 export const onRequestGet = async (context: {
   params: { user_id: string };
   env: Env;

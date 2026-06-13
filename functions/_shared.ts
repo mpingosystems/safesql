@@ -26,10 +26,28 @@ export interface Env {
   REALITYDB_LAB_API_KEY?: string;
 }
 
+// CORS for the app-origin Functions (checkout, portal, digest). Public REST
+// endpoints (validate, schema/sync, badge) keep their own '*' origin.
+export const corsHeaders: Record<string, string> = {
+  'Access-Control-Allow-Origin': 'https://safesqlpro.dev',
+  'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Max-Age': '86400',
+};
+
+// 204 response for a CORS preflight (OPTIONS) request.
+export function preflight(): Response {
+  return new Response(null, { status: 204, headers: corsHeaders });
+}
+
 export function json(body: unknown, init: ResponseInit = {}): Response {
   return new Response(JSON.stringify(body), {
     ...init,
-    headers: { 'content-type': 'application/json', ...(init.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      'Access-Control-Allow-Origin': 'https://safesqlpro.dev',
+      ...(init.headers ?? {}),
+    },
   });
 }
 
@@ -40,7 +58,7 @@ export function error(status: number, message: string, extra?: Record<string, un
 export function methodNotAllowed(allowed: string[]): Response {
   return new Response(`Method not allowed`, {
     status: 405,
-    headers: { allow: allowed.join(', ') },
+    headers: { allow: allowed.join(', '), 'Access-Control-Allow-Origin': 'https://safesqlpro.dev' },
   });
 }
 

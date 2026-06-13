@@ -1,4 +1,4 @@
-import { error, json, methodNotAllowed, type Env, siteUrl } from '../_shared';
+import { error, json, methodNotAllowed, preflight, type Env, siteUrl } from '../_shared';
 
 interface CheckoutBody {
   priceId?: unknown;
@@ -11,6 +11,7 @@ interface CheckoutBody {
 // The try/catch turns any unexpected Worker crash (which Cloudflare would
 // surface as a raw 502) into a readable 500 that shows up in Functions logs.
 export const onRequest: PagesFunction<Env> = async (context) => {
+  if (context.request.method === 'OPTIONS') return preflight();
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
   try {
     return await onRequestPost(context);
@@ -18,7 +19,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     console.error('Checkout error:', (err as Error)?.message ?? err);
     return new Response(JSON.stringify({ error: 'Checkout unavailable' }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://safesqlpro.dev' },
     });
   }
 };

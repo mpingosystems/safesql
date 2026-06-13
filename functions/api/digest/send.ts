@@ -1,4 +1,4 @@
-import { error, json, methodNotAllowed, siteUrl, type Env } from '../../_shared';
+import { error, json, methodNotAllowed, preflight, siteUrl, type Env } from '../../_shared';
 import {
   computeDigestData,
   sendDigestEmail,
@@ -34,6 +34,7 @@ interface UserRow {
 }
 
 export const onRequest: PagesFunction<DigestEnv> = async (context) => {
+  if (context.request.method === 'OPTIONS') return preflight();
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
   try {
     return await handle(context.request, context.env);

@@ -1,4 +1,4 @@
-import { error, json, methodNotAllowed, siteUrl, type Env } from '../../_shared';
+import { error, json, methodNotAllowed, preflight, siteUrl, type Env } from '../../_shared';
 
 interface PortalBody {
   // Clerk user id of the signed-in user. The customer id is looked up server-side
@@ -7,6 +7,7 @@ interface PortalBody {
 }
 
 export const onRequest: PagesFunction<Env> = async (context) => {
+  if (context.request.method === 'OPTIONS') return preflight();
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
   try {
     return await onRequestPost(context);
@@ -14,7 +15,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     console.error('Portal error:', (err as Error)?.message ?? err);
     return new Response(JSON.stringify({ error: 'Billing portal unavailable' }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': 'https://safesqlpro.dev' },
     });
   }
 };

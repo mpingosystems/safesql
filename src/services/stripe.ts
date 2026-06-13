@@ -32,7 +32,7 @@ export async function startCheckout(priceId: string, identity: CheckoutIdentity 
     };
   }
 
-  const endpoint = (import.meta.env.VITE_CHECKOUT_ENDPOINT as string | undefined) || apiUrl('/api/checkout');
+  const endpoint = apiUrl('/api/checkout');
 
   let res: Response;
   try {

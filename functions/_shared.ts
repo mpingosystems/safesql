@@ -2,19 +2,26 @@
 // Pages Functions auto-routes filesystem → /api/* paths.
 
 export interface Env {
-  // Stripe — set in Pages dashboard > Settings > Environment variables (encrypted).
+  // ── Stripe ──────────────────────────────────────────────────────────
   STRIPE_SECRET_KEY: string;
   STRIPE_WEBHOOK_SECRET: string;
-
-  // Public URL of the deployed site, used for Stripe success/cancel URLs.
-  // Defaults to https://safesqlpro.dev when unset.
+  // Comma-separated Stripe price IDs per plan tier.
+  // e.g. STRIPE_PRO_PRICE_IDS="price_abc,price_def"
+  STRIPE_PRO_PRICE_IDS?: string;
+  STRIPE_TEAM_PRICE_IDS?: string;
+  STRIPE_BUSINESS_PRICE_IDS?: string;
+  // Stripe Customer Portal configuration ID (uses account default if unset).
+  STRIPE_PORTAL_ID?: string;
+  // ── Site ────────────────────────────────────────────────────────────
+  // Public origin for Stripe redirect URLs; defaults to https://safesqlpro.dev.
   SITE_URL?: string;
-
-  // Supabase — service-role key bypasses RLS (only for trusted server code).
+  // ── Supabase ─────────────────────────────────────────────────────────
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
-
-  // RealityDB SimLab — for /api/sandbox sandbox execution.
+  // ── Email (Resend) — all email is skipped gracefully if unset ────────
+  RESEND_API_KEY?: string;
+  RESEND_FROM?: string;
+  // ── RealityDB SimLab ─────────────────────────────────────────────────
   REALITYDB_LAB_API_BASE?: string;
   REALITYDB_LAB_API_KEY?: string;
 }

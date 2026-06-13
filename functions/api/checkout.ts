@@ -2,11 +2,7 @@ import { error, json, methodNotAllowed, type Env, siteUrl } from '../_shared';
 
 interface CheckoutBody {
   priceId?: unknown;
-  // Optional — if present, ties the Checkout Session to a specific user
-  // so the webhook can identify them. Sprint 2 B-phase will populate this
-  // with the Clerk user ID once auth is wired up.
   clientReferenceId?: unknown;
-  // Optional — pre-fills email on Stripe's hosted checkout.
   customerEmail?: unknown;
 }
 
@@ -65,11 +61,19 @@ const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promis
     params.set('customer_email', body.customerEmail);
   }
 
+  if (typeof body.clientReferenceId === 'string' && body.clientReferenceId) {
+    params.set('subscription_data[metadata][clerk_user_id]', body.clientReferenceId);
+  }
+  params.set('subscription_data[metadata][site]', 'safesqlpro.dev');
+
+  const idempotencyKey = crypto.randomUUID();
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
       'Content-Type': 'application/x-www-form-urlencoded',
+      'Stripe-Version': '2024-12-18.acacia',
+      'Idempotency-Key': idempotencyKey,
     },
     body: params.toString(),
   });

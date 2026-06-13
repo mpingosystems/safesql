@@ -1,16 +1,5 @@
 import { error, json, methodNotAllowed, type Env } from '../../_shared';
 
-interface WebhookEnv extends Env {
-  // Comma-separated price IDs that map to each plan. Set in Pages env.
-  // e.g. STRIPE_PRO_PRICE_IDS="price_1Q...monthly,price_1Q...annual"
-  STRIPE_PRO_PRICE_IDS?: string;
-  STRIPE_TEAM_PRICE_IDS?: string;
-  STRIPE_BUSINESS_PRICE_IDS?: string;
-  // Optional transactional email (Resend). All email is skipped gracefully if unset.
-  RESEND_API_KEY?: string;
-  RESEND_FROM?: string;
-}
-
 type Plan = 'free' | 'pro' | 'team' | 'business';
 
 interface StripeEvent {
@@ -23,12 +12,12 @@ interface StripeEvent {
 // to the SPA's static-asset catch-all (returning index.html) when the path
 // is nested. Explicit onRequest catches every method so a browser visit to
 // the webhook URL gets 405 instead of the landing page.
-export const onRequest: PagesFunction<WebhookEnv> = async (context) => {
+export const onRequest: PagesFunction<Env> = async (context) => {
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
   return onRequestPost(context);
 };
 
-const onRequestPost = async ({ request, env }: Parameters<PagesFunction<WebhookEnv>>[0]): Promise<Response> => {
+const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]): Promise<Response> => {
   if (!env.STRIPE_WEBHOOK_SECRET) return error(500, 'STRIPE_WEBHOOK_SECRET not configured.');
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     return error(500, 'Supabase env not configured.');
@@ -48,6 +37,12 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<WebhookE
     event = JSON.parse(rawBody) as StripeEvent;
   } catch {
     return error(400, 'Invalid JSON.');
+  }
+
+  const isNew = await claimEvent(event.id, event.type, env);
+  if (!isNew) {
+    // Duplicate delivery — already processed, acknowledge and exit.
+    return json({ received: true });
   }
 
   try {
@@ -72,21 +67,25 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<WebhookE
         await handlePaymentSucceeded(event.data.object, env);
         break;
       default:
-        // Ignore unknown event types — Stripe sends many we don't care about.
+        // Unhandled event types are silently ignored.
+        // Future candidates: invoice.payment_action_required (SCA/3DS),
+        // customer.subscription.paused, customer.subscription.resumed.
         break;
     }
   } catch (e) {
     // Return 500 so Stripe retries. Don't leak internal detail to caller.
     console.error('webhook handler error', event.type, e);
+    await unclaimEvent(event.id, env);
     return error(500, 'Webhook handler failed.');
   }
 
+  await completeEvent(event.id, env);
   return json({ received: true });
 };
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
-async function handleCheckoutCompleted(session: any, env: WebhookEnv): Promise<void> {
+async function handleCheckoutCompleted(session: any, env: Env): Promise<void> {
   const clerkUserId: string | undefined = session.client_reference_id;
   const customerId: string | undefined = session.customer;
   const subscriptionId: string | undefined = session.subscription;
@@ -116,7 +115,7 @@ async function handleCheckoutCompleted(session: any, env: WebhookEnv): Promise<v
     `<p>Your account has been upgraded to <strong>${cap(plan)}</strong>. Thanks for subscribing to SafeSQL Pro.</p>`);
 }
 
-async function handleSubscriptionChange(subscription: any, env: WebhookEnv): Promise<void> {
+async function handleSubscriptionChange(subscription: any, env: Env): Promise<void> {
   const subscriptionId: string = subscription.id;
   const priceId: string | undefined = subscription.items?.data?.[0]?.price?.id;
   const plan = planForPriceId(priceId, env);
@@ -125,7 +124,7 @@ async function handleSubscriptionChange(subscription: any, env: WebhookEnv): Pro
   await bestEffortPatch(`stripe_subscription_id=eq.${enc(subscriptionId)}`, { subscription_status: subscription.status ?? 'active' }, env);
 }
 
-async function handleSubscriptionCancelled(subscription: any, env: WebhookEnv): Promise<void> {
+async function handleSubscriptionCancelled(subscription: any, env: Env): Promise<void> {
   const subscriptionId: string = subscription.id;
   // Look up the user (for the audit event + email) before we clear the sub id.
   const user = await fetchUserBySubscriptionId(subscriptionId, env);
@@ -142,9 +141,16 @@ async function handleSubscriptionCancelled(subscription: any, env: WebhookEnv): 
     `<p>Your subscription has been cancelled and your account is now on the Free plan. You can resubscribe anytime at safesqlpro.dev/pricing.</p>`);
 }
 
-async function handlePaymentFailed(invoice: any, env: WebhookEnv): Promise<void> {
-  const subscriptionId: string | undefined = invoice.subscription;
-  if (!subscriptionId) return;
+async function handlePaymentFailed(invoice: any, env: Env): Promise<void> {
+  // invoice.subscription is present in Stripe API <= 2024-12-18.acacia.
+  // Migrate to invoice.parent.subscription_details.subscription when
+  // upgrading the pinned version.
+  const subId = (invoice as any).subscription as string | undefined;
+  if (!subId) {
+    console.warn('[webhook] invoice.subscription missing — check pinned Stripe-Version', invoice.id);
+    return;
+  }
+  const subscriptionId: string = subId;
   // Grace period: mark past_due but do NOT revoke access. Stripe retries per dunning.
   await bestEffortPatch(`stripe_subscription_id=eq.${enc(subscriptionId)}`, { subscription_status: 'past_due' }, env);
   const user = await fetchUserBySubscriptionId(subscriptionId, env);
@@ -152,9 +158,16 @@ async function handlePaymentFailed(invoice: any, env: WebhookEnv): Promise<void>
     `<p>We couldn't process your latest payment. Please update your card in the billing portal to keep your subscription active. We'll retry automatically.</p>`);
 }
 
-async function handlePaymentSucceeded(invoice: any, env: WebhookEnv): Promise<void> {
-  const subscriptionId: string | undefined = invoice.subscription;
-  if (!subscriptionId) return;
+async function handlePaymentSucceeded(invoice: any, env: Env): Promise<void> {
+  // invoice.subscription is present in Stripe API <= 2024-12-18.acacia.
+  // Migrate to invoice.parent.subscription_details.subscription when
+  // upgrading the pinned version.
+  const subId = (invoice as any).subscription as string | undefined;
+  if (!subId) {
+    console.warn('[webhook] invoice.subscription missing — check pinned Stripe-Version', invoice.id);
+    return;
+  }
+  const subscriptionId: string = subId;
   await bestEffortPatch(`stripe_subscription_id=eq.${enc(subscriptionId)}`, { subscription_status: 'active' }, env);
   // New billing period — reset monthly usage counters.
   await bestEffortPatch(
@@ -164,7 +177,7 @@ async function handlePaymentSucceeded(invoice: any, env: WebhookEnv): Promise<vo
   );
 }
 
-async function handleTrialWillEnd(subscription: any, env: WebhookEnv): Promise<void> {
+async function handleTrialWillEnd(subscription: any, env: Env): Promise<void> {
   if (!env.RESEND_API_KEY) return; // skip gracefully if email isn't configured
   const user = await fetchUserBySubscriptionId(subscription.id, env);
   await sendEmail(env, user.email, 'Your SafeSQL Pro trial ends soon',
@@ -175,13 +188,16 @@ async function handleTrialWillEnd(subscription: any, env: WebhookEnv): Promise<v
 
 async function fetchStripeSubscription(id: string, env: Env): Promise<any> {
   const res = await fetch(`https://api.stripe.com/v1/subscriptions/${id}`, {
-    headers: { Authorization: `Bearer ${env.STRIPE_SECRET_KEY}` },
+    headers: {
+      Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+      'Stripe-Version': '2024-12-18.acacia',
+    },
   });
   if (!res.ok) throw new Error(`Stripe sub fetch ${res.status}`);
   return res.json();
 }
 
-function planForPriceId(priceId: string | undefined, env: WebhookEnv): Plan {
+function planForPriceId(priceId: string | undefined, env: Env): Plan {
   if (!priceId) return 'free';
   const inList = (csv: string | undefined) =>
     !!csv && csv.split(',').map((s) => s.trim()).includes(priceId);
@@ -234,16 +250,30 @@ async function patchUserBySubscriptionId(
 }
 
 // Patch that is allowed to fail (e.g. subscription_status column not yet added).
-async function bestEffortPatch(filter: string, patch: Record<string, unknown>, env: Env): Promise<void> {
-  if (filter.endsWith('eq.')) return; // empty identifier — nothing to match
+async function bestEffortPatch(
+  filter: string,
+  patch: Record<string, unknown>,
+  env: Env,
+): Promise<void> {
+  if (filter.endsWith('eq.')) return; // empty identifier — skip
   try {
-    await fetch(`${env.SUPABASE_URL}/rest/v1/users?${filter}`, {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/users?${filter}`, {
       method: 'PATCH',
       headers: supabaseHeaders(env),
       body: JSON.stringify(patch),
     });
-  } catch {
-    /* best-effort */
+    if (!res.ok) {
+      // Non-throwing by design, but log so silent failures are observable
+      // in Cloudflare Workers logs → Pages > Functions > Real-time logs.
+      console.warn(
+        '[webhook] bestEffortPatch non-ok',
+        res.status,
+        filter,
+        Object.keys(patch),
+      );
+    }
+  } catch (e) {
+    console.warn('[webhook] bestEffortPatch threw', filter, (e as Error)?.message);
   }
 }
 
@@ -283,9 +313,126 @@ function supabaseHeaders(env: Env): HeadersInit {
   };
 }
 
+// ── Webhook idempotency ─────────────────────────────────────────────────────
+
+// Claim an event by inserting its id. Returns true if newly claimed (process
+// it), false if it already exists (duplicate delivery — skip). Fails open
+// (returns true) on any error: better to risk double-processing than to block
+// every webhook when the idempotency store is unreachable.
+async function claimEvent(
+  eventId: string, eventType: string, env: Env
+): Promise<boolean> {
+  // Step 1: attempt to INSERT (claim the event).
+  let insertRes: Response;
+  try {
+    insertRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/processed_stripe_events`,
+      {
+        method: 'POST',
+        headers: {
+          ...supabaseHeaders(env),
+          Prefer: 'resolution=ignore-duplicates,return=representation',
+        },
+        body: JSON.stringify({ event_id: eventId, event_type: eventType }),
+      },
+    );
+  } catch {
+    return true; // network error — fail open
+  }
+  if (!insertRes.ok) {
+    console.warn('[webhook] claimEvent insert error', insertRes.status, eventId);
+    return true; // fail open
+  }
+  const newRows = (await insertRes.json()) as unknown[];
+  if (newRows.length > 0) return true; // ✅ newly claimed
+
+  // Step 2: row exists. Check claimed_at / completed_at.
+  let row: { completed_at: string | null; claimed_at: string } | undefined;
+  try {
+    const checkRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/processed_stripe_events` +
+        `?event_id=eq.${enc(eventId)}&select=claimed_at,completed_at`,
+      { headers: supabaseHeaders(env) },
+    );
+    if (checkRes.ok) {
+      const rows = (await checkRes.json()) as typeof row[];
+      row = rows[0];
+    }
+  } catch { /* fall through to fail-open */ }
+
+  if (!row) return true; // disappeared or unreachable — fail open
+
+  // Step 3a: already completed — genuine duplicate delivery, skip.
+  if (row.completed_at !== null) return false;
+
+  // Step 3b: claimed but not completed.
+  // If claimed < 5 min ago another Worker may still be running — skip.
+  const STALE_MS = 5 * 60 * 1000;
+  const claimedAgoMs = Date.now() - new Date(row.claimed_at).getTime();
+  if (claimedAgoMs < STALE_MS) {
+    console.warn('[webhook] event in-flight, skipping duplicate', eventId);
+    return false;
+  }
+
+  // Step 3c: stale claim (Worker crashed). Delete and reclaim.
+  console.warn('[webhook] reclaiming stale claim (Worker crash?)', eventId,
+    `claimed ${Math.round(claimedAgoMs / 1000)}s ago`);
+  await unclaimEvent(eventId, env);
+  try {
+    const reclaimRes = await fetch(
+      `${env.SUPABASE_URL}/rest/v1/processed_stripe_events`,
+      {
+        method: 'POST',
+        headers: {
+          ...supabaseHeaders(env),
+          Prefer: 'resolution=ignore-duplicates,return=representation',
+        },
+        body: JSON.stringify({ event_id: eventId, event_type: eventType }),
+      },
+    );
+    if (!reclaimRes.ok) return true; // fail open
+    const reclaimRows = (await reclaimRes.json()) as unknown[];
+    return reclaimRows.length > 0;
+  } catch {
+    return true; // fail open
+  }
+}
+
+// Release a previously claimed event so Stripe's retry can reprocess it.
+// Best-effort: any failure is swallowed (the event simply stays claimed).
+async function unclaimEvent(eventId: string, env: Env): Promise<void> {
+  try {
+    await fetch(`${env.SUPABASE_URL}/rest/v1/processed_stripe_events?event_id=eq.${enc(eventId)}`, {
+      method: 'DELETE',
+      headers: supabaseHeaders(env),
+    });
+  } catch {
+    /* best-effort unclaim */
+  }
+}
+
+// Mark a claimed event as fully processed. Best-effort: if this fails the
+// event will appear as a stale claim after 5 min and will be reclaimed on
+// the next Stripe retry (which Stripe will issue because we'd return 500).
+async function completeEvent(eventId: string, env: Env): Promise<void> {
+  try {
+    await fetch(
+      `${env.SUPABASE_URL}/rest/v1/processed_stripe_events` +
+        `?event_id=eq.${enc(eventId)}`,
+      {
+        method: 'PATCH',
+        headers: supabaseHeaders(env),
+        body: JSON.stringify({ completed_at: new Date().toISOString() }),
+      },
+    );
+  } catch {
+    /* best-effort complete — stale-reclaim handles the crash path */
+  }
+}
+
 // ── Email (Resend) — best-effort, no-op when RESEND_API_KEY is unset ─────────
 
-async function sendEmail(env: WebhookEnv, to: string | undefined, subject: string, html: string): Promise<void> {
+async function sendEmail(env: Env, to: string | undefined, subject: string, html: string): Promise<void> {
   if (!env.RESEND_API_KEY || !to) return;
   try {
     await fetch('https://api.resend.com/emails', {

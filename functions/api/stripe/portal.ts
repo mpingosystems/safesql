@@ -1,23 +1,25 @@
 import { error, json, methodNotAllowed, siteUrl, type Env } from '../../_shared';
 
-interface PortalEnv extends Env {
-  // Optional billing-portal configuration id (bpc_...). If unset, Stripe uses the
-  // account's default portal configuration.
-  STRIPE_PORTAL_ID?: string;
-}
-
 interface PortalBody {
   // Clerk user id of the signed-in user. The customer id is looked up server-side
   // so it can't be spoofed from a stale client value.
   clerkUserId?: unknown;
 }
 
-export const onRequest: PagesFunction<PortalEnv> = async (context) => {
+export const onRequest: PagesFunction<Env> = async (context) => {
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
-  return onRequestPost(context);
+  try {
+    return await onRequestPost(context);
+  } catch (err) {
+    console.error('Portal error:', (err as Error)?.message ?? err);
+    return new Response(JSON.stringify({ error: 'Billing portal unavailable' }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 };
 
-const onRequestPost = async ({ request, env }: Parameters<PagesFunction<PortalEnv>>[0]): Promise<Response> => {
+const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]): Promise<Response> => {
   if (!env.STRIPE_SECRET_KEY) return error(500, 'STRIPE_SECRET_KEY not configured.');
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return error(500, 'Supabase env not configured.');
 
@@ -52,11 +54,14 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<PortalEn
   params.set('return_url', `${siteUrl(env)}/#/settings`);
   if (env.STRIPE_PORTAL_ID) params.set('configuration', env.STRIPE_PORTAL_ID);
 
+  const idempotencyKey = crypto.randomUUID();
   const res = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
       'Content-Type': 'application/x-www-form-urlencoded',
+      'Stripe-Version': '2024-12-18.acacia',
+      'Idempotency-Key': idempotencyKey,
     },
     body: params.toString(),
   });

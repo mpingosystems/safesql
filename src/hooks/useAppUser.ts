@@ -22,6 +22,10 @@ export interface AppUser {
 export interface UseAppUserResult {
   appUser: AppUser | null;
   isLoading: boolean;
+  // True once Clerk has finished loading (or always true when Clerk isn't built
+  // into this deployment). Checkout buttons gate on this so a click can't fire
+  // before the Clerk user id is available to pass as clientReferenceId.
+  isClerkReady: boolean;
   error: string | null;
   refresh: () => Promise<void>;
 }
@@ -31,7 +35,7 @@ const NOOP_REFRESH = async () => {};
 // No-Clerk implementation: returns nulls, no hooks. Used when the build has
 // no VITE_CLERK_PUBLISHABLE_KEY (deployments before auth is configured).
 function useAppUserUnauth(): UseAppUserResult {
-  return { appUser: null, isLoading: false, error: null, refresh: NOOP_REFRESH };
+  return { appUser: null, isLoading: false, isClerkReady: true, error: null, refresh: NOOP_REFRESH };
 }
 
 // Clerk-enabled implementation: always calls useUser() (we know ClerkProvider
@@ -99,7 +103,7 @@ function useAppUserAuth(): UseAppUserResult {
     void fetchOrUpsert();
   }, [fetchOrUpsert]);
 
-  return { appUser, isLoading, error, refresh: fetchOrUpsert };
+  return { appUser, isLoading, isClerkReady: isLoaded, error, refresh: fetchOrUpsert };
 }
 
 // Module-level switch — bound at build time, so within any deployed bundle

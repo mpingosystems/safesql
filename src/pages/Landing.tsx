@@ -197,7 +197,7 @@ function StepCard({ num, title, body }: { num: number; title: string; body: stri
 }
 
 export function PricingSection() {
-  const { appUser } = useAppUser();
+  const { appUser, isClerkReady } = useAppUser();
   const [cadence, setCadence] = useState<'monthly' | 'annual'>('monthly');
   const [busyPlan, setBusyPlan] = useState<Plan | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -257,9 +257,9 @@ export function PricingSection() {
           period={monthly ? 'per month' : 'per year'}
           highlight
           features={['Unlimited validations', 'AI explanations', 'Apply-fix button', 'Schema connections', 'Query library', 'Shareable permalinks']}
-          cta={busyPlan === 'pro' ? 'Loading…' : 'Upgrade to Pro'}
+          cta={busyPlan === 'pro' || !isClerkReady ? 'Loading…' : 'Upgrade to Pro'}
           onUpgrade={() => void handleUpgrade('pro')}
-          disabled={busyPlan !== null}
+          disabled={busyPlan !== null || !isClerkReady}
           recommended={recommended === 'pro'}
         />
         <PricingCard
@@ -267,9 +267,9 @@ export function PricingSection() {
           price={monthly ? '$199' : '$1,910'}
           period={monthly ? 'per month · 5 seats' : 'per year · 5 seats'}
           features={['Everything in Pro', '5 seats', 'Team analytics', 'Approval workflow', 'Shared query library', 'GitHub Action']}
-          cta={busyPlan === 'team' ? 'Loading…' : 'Start team trial'}
+          cta={busyPlan === 'team' || !isClerkReady ? 'Loading…' : 'Start team trial'}
           onUpgrade={() => void handleUpgrade('team')}
-          disabled={busyPlan !== null}
+          disabled={busyPlan !== null || !isClerkReady}
           recommended={recommended === 'team'}
         />
         <PricingCard
@@ -277,9 +277,9 @@ export function PricingSection() {
           price={monthly ? '$599' : '$5,750'}
           period={monthly ? 'per month · 20 seats' : 'per year · 20 seats'}
           features={['Everything in Team', '20 seats', 'Audit log', 'Custom rules', 'CSV export', 'Slack alerts', 'SOC 2 alignment']}
-          cta={busyPlan === 'business' ? 'Loading…' : 'Contact sales'}
+          cta={busyPlan === 'business' || !isClerkReady ? 'Loading…' : 'Contact sales'}
           onUpgrade={() => void handleUpgrade('business')}
-          disabled={busyPlan !== null}
+          disabled={busyPlan !== null || !isClerkReady}
           recommended={recommended === 'business'}
         />
       </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { startCheckoutForPlan, type Cadence, type Plan } from '../services/stripe';
+import { useAppUser } from '../hooks/useAppUser';
 
 interface UpgradeBannerProps {
   plan?: Plan;
@@ -14,13 +15,17 @@ export function UpgradeBanner({
   reason = "You've used your free validations for the month.",
   onDismiss,
 }: UpgradeBannerProps) {
+  const { appUser, isClerkReady } = useAppUser();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleUpgrade = async () => {
     setBusy(true);
     setError(null);
-    const result = await startCheckoutForPlan(plan, cadence);
+    const result = await startCheckoutForPlan(plan, cadence, {
+      clientReferenceId: appUser?.clerkUserId,
+      customerEmail: appUser?.email,
+    });
     setBusy(false);
     if (!result.ok) setError(result.message ?? 'Checkout failed.');
   };
@@ -53,7 +58,7 @@ export function UpgradeBanner({
       <button
         type="button"
         onClick={() => void handleUpgrade()}
-        disabled={busy}
+        disabled={busy || !isClerkReady}
         style={{
           background: '#fbbf24',
           color: '#0a0a0a',
@@ -62,11 +67,11 @@ export function UpgradeBanner({
           padding: '8px 16px',
           fontSize: 13,
           fontWeight: 700,
-          cursor: busy ? 'wait' : 'pointer',
-          opacity: busy ? 0.7 : 1,
+          cursor: busy ? 'wait' : !isClerkReady ? 'not-allowed' : 'pointer',
+          opacity: busy || !isClerkReady ? 0.7 : 1,
         }}
       >
-        {busy ? 'Loading…' : 'Upgrade →'}
+        {busy || !isClerkReady ? 'Loading…' : 'Upgrade →'}
       </button>
       {onDismiss && (
         <button

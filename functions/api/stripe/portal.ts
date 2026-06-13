@@ -55,16 +55,33 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]
   if (env.STRIPE_PORTAL_ID) params.set('configuration', env.STRIPE_PORTAL_ID);
 
   const idempotencyKey = crypto.randomUUID();
-  const res = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Stripe-Version': '2024-12-18.acacia',
-      'Idempotency-Key': idempotencyKey,
-    },
-    body: params.toString(),
-  });
+  // Bound the outbound call so a hung/failed api.stripe.com subrequest becomes a
+  // catchable JSON error rather than a bare Cloudflare 502 (Worker killed).
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  let res: Response;
+  try {
+    res = await fetch('https://api.stripe.com/v1/billing_portal/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Stripe-Version': '2024-12-18.acacia',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: params.toString(),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const aborted = (err as Error)?.name === 'AbortError';
+    return error(aborted ? 504 : 502, aborted ? 'Stripe portal timeout' : 'Stripe portal unreachable', {
+      detail: aborted
+        ? 'No response from api.stripe.com within 10s.'
+        : ((err as Error)?.message ?? String(err)),
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
   if (!res.ok) {
     const detail = await res.text();
     return error(502, 'Stripe portal error', { stripeStatus: res.status, detail });

@@ -68,7 +68,7 @@ interface Props {
 }
 
 export function ROICalculator({ onRecommend }: Props) {
-  const { appUser } = useAppUser();
+  const { appUser, isClerkReady } = useAppUser();
   const [analysts, setAnalysts] = useState(5);
   const [salary, setSalary] = useState(100_000);
   const [validationsPerDay, setValidationsPerDay] = useState(5);
@@ -124,8 +124,21 @@ export function ROICalculator({ onRecommend }: Props) {
             For your team of {analysts}, that's {money(perAnalyst)} per analyst. You save{' '}
             <strong style={{ color: '#22c55e' }}>{money(roi.monthlySavings)}</strong> every month — a {roi.annualRoiMultiple.toFixed(0)}× return on investment.
           </p>
-          <button type="button" onClick={() => void checkout()} style={cta}>
-            {roi.tier === 'enterprise' ? 'Contact sales →' : `Get started for ${money(roi.safesqlCost)}/month →`}
+          <button
+            type="button"
+            onClick={() => void checkout()}
+            disabled={roi.tier !== 'enterprise' && !isClerkReady}
+            style={{
+              ...cta,
+              cursor: roi.tier !== 'enterprise' && !isClerkReady ? 'not-allowed' : 'pointer',
+              opacity: roi.tier !== 'enterprise' && !isClerkReady ? 0.6 : 1,
+            }}
+          >
+            {roi.tier === 'enterprise'
+              ? 'Contact sales →'
+              : !isClerkReady
+                ? 'Loading…'
+                : `Get started for ${money(roi.safesqlCost)}/month →`}
           </button>
         </div>
       </div>

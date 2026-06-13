@@ -67,16 +67,34 @@ const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promis
   params.set('subscription_data[metadata][site]', 'safesqlpro.dev');
 
   const idempotencyKey = crypto.randomUUID();
-  const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Stripe-Version': '2024-12-18.acacia',
-      'Idempotency-Key': idempotencyKey,
-    },
-    body: params.toString(),
-  });
+  // Bound the outbound call. A hung/failed subrequest to api.stripe.com is what
+  // surfaces as a bare Cloudflare 502 (the Worker is killed before it can return).
+  // Aborting turns that into a catchable, observable JSON error instead.
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  let stripeRes: Response;
+  try {
+    stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.STRIPE_SECRET_KEY}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Stripe-Version': '2024-12-18.acacia',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: params.toString(),
+      signal: controller.signal,
+    });
+  } catch (err) {
+    const aborted = (err as Error)?.name === 'AbortError';
+    return error(aborted ? 504 : 502, aborted ? 'Stripe API timeout' : 'Stripe API unreachable', {
+      detail: aborted
+        ? 'No response from api.stripe.com within 10s.'
+        : ((err as Error)?.message ?? String(err)),
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!stripeRes.ok) {
     const detail = await stripeRes.text();

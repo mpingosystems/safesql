@@ -27,7 +27,7 @@ Open **Supabase Dashboard → SQL Editor**.
 supabase/migrations/20260612120000_processed_stripe_events.sql
 ```
 
-**Environment with old `processed_at` schema (20260612120000 already applied):** paste and run:
+**Existing environment with old `processed_at` schema:** paste and run:
 
 ```
 supabase/migrations/20260612120001_pse_add_completed_at.sql

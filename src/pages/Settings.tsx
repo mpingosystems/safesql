@@ -7,6 +7,7 @@ import {
   hashApiKey,
 } from '../services/apiKeys';
 import { computeBadgeCriteria } from '../services/badge';
+import { apiUrl } from '../config/api';
 import { listSchemaConnections, type SchemaConnectionSummary } from '../services/schemaConnections';
 import { SUPPORTED_DIALECTS } from '../services/schemaConnector';
 import type { DigestFrequency } from '../services/digest';
@@ -55,7 +56,7 @@ export function SettingsPage() {
     if (!appUser?.clerkUserId || portalBusy) return;
     setPortalBusy(true);
     try {
-      const res = await fetch('/api/stripe/portal', {
+      const res = await fetch(apiUrl('/api/stripe/portal'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ clerkUserId: appUser.clerkUserId }),

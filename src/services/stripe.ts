@@ -1,4 +1,5 @@
 import { STRIPE_PRICES } from '../config/stripe';
+import { apiUrl } from '../config/api';
 
 export type Plan = 'pro' | 'team' | 'business';
 export type Cadence = 'monthly' | 'annual';
@@ -31,7 +32,7 @@ export async function startCheckout(priceId: string, identity: CheckoutIdentity 
     };
   }
 
-  const endpoint = import.meta.env.VITE_CHECKOUT_ENDPOINT || '/api/checkout';
+  const endpoint = (import.meta.env.VITE_CHECKOUT_ENDPOINT as string | undefined) || apiUrl('/api/checkout');
 
   let res: Response;
   try {

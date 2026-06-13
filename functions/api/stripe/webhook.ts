@@ -102,7 +102,7 @@ async function handleCheckoutCompleted(session: any, env: Env): Promise<void> {
   const sub = await fetchStripeSubscription(subscriptionId, env);
   const plan = planForPriceId(sub.items?.data?.[0]?.price?.id, env);
 
-  await upsertUserPlan(clerkUserId, {
+  await upsertUserPlan(clerkUserId, email, {
     plan,
     stripe_customer_id: customerId ?? null,
     stripe_subscription_id: subscriptionId,
@@ -219,9 +219,32 @@ function enc(v: string): string {
   return encodeURIComponent(v);
 }
 
-async function upsertUserPlan(clerkUserId: string, patch: UserPatch, env: Env): Promise<void> {
-  const url = `${env.SUPABASE_URL}/rest/v1/users?clerk_user_id=eq.${enc(clerkUserId)}`;
-  const res = await fetch(url, {
+async function upsertUserPlan(
+  clerkUserId: string,
+  email: string | undefined,
+  patch: UserPatch,
+  env: Env,
+): Promise<void> {
+  // True create-or-update. The client normally creates the users row on first
+  // sign-in, but if that failed (e.g. Supabase doesn't trust the Clerk JWT and
+  // the upsert 401s) the row may be missing here — and a plain PATCH would
+  // match zero rows, leaving a paying customer un-upgraded. The service-role
+  // key bypasses RLS. email is NOT NULL in the schema, so we can only INSERT
+  // when the checkout event carried one; otherwise fall back to update-only.
+  if (email) {
+    const res = await fetch(`${env.SUPABASE_URL}/rest/v1/users?on_conflict=clerk_user_id`, {
+      method: 'POST',
+      headers: { ...supabaseHeaders(env), Prefer: 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify({ clerk_user_id: clerkUserId, email, ...patch }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Supabase upsert user ${res.status}: ${text}`);
+    }
+    return;
+  }
+
+  const res = await fetch(`${env.SUPABASE_URL}/rest/v1/users?clerk_user_id=eq.${enc(clerkUserId)}`, {
     method: 'PATCH',
     headers: supabaseHeaders(env),
     body: JSON.stringify(patch),

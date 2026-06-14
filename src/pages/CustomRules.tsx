@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
 import { validateSQL } from '../services/sqlValidator';
+import { apiUrl } from '../config/api';
+import type { SuggestedRule } from '../services/ruleSuggestion';
 import type { CustomRule, CustomRuleType } from '../types/validation';
 
 // Sprint 8 Part 5 — custom rules authoring at /team/rules (Business tier).
@@ -25,6 +27,52 @@ export function CustomRulesPage() {
   const [message, setMessage] = useState('');
   const [testSql, setTestSql] = useState("SELECT id FROM orders WHERE status = 'x'");
   const [result, setResult] = useState<string | null>(null);
+
+  // NL rule authoring (Sprint 11 P4) — Claude drafts the rule config; deterministic
+  // engine still does all detection.
+  const [nlDesc, setNlDesc] = useState('');
+  const [nlKey, setNlKey] = useState('');
+  const [nlBusy, setNlBusy] = useState(false);
+  const [nlMsg, setNlMsg] = useState<string | null>(null);
+
+  const applyRule = (rule: SuggestedRule) => {
+    setName(rule.name || rule.description || '');
+    setRuleType(rule.rule_type);
+    const cfgObj = rule.config as Record<string, unknown>;
+    const rest: Record<string, string> = {};
+    for (const [k, v] of Object.entries(cfgObj)) {
+      if (k !== 'message' && typeof v === 'string') rest[k] = v;
+    }
+    setCfg(rest);
+    setMessage(typeof cfgObj.message === 'string' ? cfgObj.message : rule.description || '');
+  };
+
+  const generateRule = async () => {
+    if (!nlDesc.trim() || !nlKey.trim()) {
+      setNlMsg('Enter a description and your API key.');
+      return;
+    }
+    setNlBusy(true);
+    setNlMsg(null);
+    try {
+      const res = await fetch(apiUrl('/api/rules/suggest'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${nlKey.trim()}` },
+        body: JSON.stringify({ description: nlDesc }),
+      });
+      const data = (await res.json()) as { rule?: SuggestedRule; error?: string };
+      if (res.ok && data.rule) {
+        applyRule(data.rule);
+        setNlMsg('✓ Rule drafted below — review and save.');
+      } else {
+        setNlMsg(data.error ?? 'Could not generate a rule.');
+      }
+    } catch {
+      setNlMsg('Network error.');
+    } finally {
+      setNlBusy(false);
+    }
+  };
 
   const fields = RULE_TYPES.find((r) => r.value === ruleType)!.fields;
 
@@ -51,6 +99,36 @@ export function CustomRulesPage() {
     <Shell>
       <h1 style={{ fontSize: 22 }}>Custom Rules</h1>
       <p style={{ color: '#a1a1aa', fontSize: 13 }}>Encode your team's SQL policy on top of the 33+ semantic detectors.</p>
+
+      <h2 style={{ fontSize: 14, color: '#a1a1aa', marginTop: 16 }}>Describe a rule</h2>
+      <div style={card}>
+        <p style={{ color: '#a1a1aa', fontSize: 12.5, marginTop: 0 }}>
+          Describe your SQL policy in plain English — Claude drafts the rule config below
+          for you to review. AI assists authoring only; detection stays deterministic.
+        </p>
+        <textarea
+          value={nlDesc}
+          onChange={(e) => setNlDesc(e.target.value)}
+          placeholder="Never query the payments table without filtering by tenant_id"
+          style={{ ...inp, minHeight: 56 }}
+        />
+        <input
+          type="password"
+          value={nlKey}
+          onChange={(e) => setNlKey(e.target.value)}
+          placeholder="Your API key (ssk_live_…)"
+          autoComplete="new-password"
+          style={{ ...inp, marginTop: 8 }}
+        />
+        <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center' }}>
+          <button type="button" onClick={() => void generateRule()} disabled={nlBusy} style={btn}>
+            {nlBusy ? 'Generating…' : 'Generate rule →'}
+          </button>
+          {nlMsg && <span style={{ fontSize: 12, color: nlMsg.startsWith('✓') ? '#22c55e' : '#f59e0b' }}>{nlMsg}</span>}
+        </div>
+      </div>
+
+      <h2 style={{ fontSize: 14, color: '#a1a1aa', marginTop: 16 }}>Rule</h2>
       <div style={card}>
         <Row label="Name"><input value={name} onChange={(e) => setName(e.target.value)} style={inp} placeholder="Tenant filter" /></Row>
         <Row label="Type">

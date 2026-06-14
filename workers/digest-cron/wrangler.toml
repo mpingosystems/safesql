@@ -1,0 +1,14 @@
+name = "safesql-digest-cron"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# Every Monday 09:00 UTC. Pages can't run [triggers]; this standalone Worker can.
+[triggers]
+crons = ["0 9 * * 1"]
+
+[vars]
+DIGEST_ENDPOINT = "https://safesql.pages.dev/api/digest/send"
+
+# DIGEST_CRON_SECRET is a secret — set it with:
+#   wrangler secret put DIGEST_CRON_SECRET
+# and set the SAME value in the Pages env so /api/digest/send can verify it.

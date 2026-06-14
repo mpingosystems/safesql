@@ -19,7 +19,10 @@ import {
 interface DigestEnv extends Env {
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
+  // The digest-cron Worker (workers/digest-cron) sends x-cron-secret; DIGEST_CRON_SECRET
+  // is the canonical name (CRON_SECRET kept as a fallback for older deploys).
   CRON_SECRET?: string;
+  DIGEST_CRON_SECRET?: string;
 }
 
 interface PrefRow {
@@ -62,7 +65,8 @@ async function handle(request: Request, env: DigestEnv): Promise<Response> {
   }
 
   // Batch run — guard with the cron secret when one is configured.
-  if (env.CRON_SECRET && request.headers.get('x-cron-secret') !== env.CRON_SECRET) {
+  const cronSecret = env.DIGEST_CRON_SECRET ?? env.CRON_SECRET;
+  if (cronSecret && request.headers.get('x-cron-secret') !== cronSecret) {
     return error(401, 'Invalid cron secret.');
   }
 

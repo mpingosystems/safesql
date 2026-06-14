@@ -1,0 +1,12 @@
+{
+  "name": "safesql-digest-cron",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0",
+    "@cloudflare/workers-types": "^4.20240909.0"
+  }
+}

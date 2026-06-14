@@ -57,7 +57,7 @@ export function LandingPage() {
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <a href="#/pricing" style={navLink}>Pricing</a>
-          <AuthControls />
+          <AuthControls googleNotice />
           <a href="#/editor" style={ctaButton}>Open Editor →</a>
         </div>
       </nav>

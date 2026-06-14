@@ -53,7 +53,7 @@ export function LandingPage() {
           <a href="#/" style={{ fontWeight: 700, fontSize: 18, color: '#a78bfa', textDecoration: 'none' }}>
             SafeSQL Pro
           </a>
-          <span style={{ fontSize: 11, color: '#52525b' }}>v0.8.0</span>
+          <span style={{ fontSize: 11, color: '#52525b' }}>v0.9.0</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <a href="#/pricing" style={navLink}>Pricing</a>

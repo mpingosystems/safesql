@@ -145,9 +145,6 @@ function RouteLoading({ label }: { label: string }) {
 function PricingStub() {
   return (
     <div style={{ background: '#09090b', color: '#e4e4e7', minHeight: '100vh', padding: '24px 0' }}>
-      <div style={{ padding: '0 32px' }}>
-        <a href="#/" style={{ color: '#a78bfa', textDecoration: 'none', fontSize: 13 }}>← Back to home</a>
-      </div>
       <PricingSection />
     </div>
   );

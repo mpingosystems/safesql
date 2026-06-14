@@ -52,6 +52,18 @@ export function AnalyticsPage() {
         <span style={{ color: '#71717a', fontSize: 12 }}>Last 30 days</span>
       </div>
 
+      {isPro && !loading && records.length === 0 && (
+        <div style={{ marginTop: 16, border: '1px solid #27272a', borderRadius: 8, padding: 24, background: '#18181b', textAlign: 'center' }}>
+          <div style={{ fontSize: 26 }}>📈</div>
+          <h2 style={{ fontSize: 16, margin: '8px 0 4px' }}>No validations yet</h2>
+          <p style={{ color: '#a1a1aa', fontSize: 13, margin: '0 auto', maxWidth: 420 }}>
+            Validate some SQL in the editor and your quality trends — pass rate by source, the most
+            common issues, and score distribution — will start showing up here.
+          </p>
+          <a href="#/editor" style={ctaBtn}>Open the editor →</a>
+        </div>
+      )}
+
       <div style={{ position: 'relative', marginTop: 16 }}>
         <div style={isPro ? undefined : blurred}>
           {/* Overview cards */}

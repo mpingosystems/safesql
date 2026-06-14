@@ -272,6 +272,7 @@ export function EditorPage() {
           )}
           <a href="#/library" style={navLink}>Library</a>
           <a href="#/analytics" style={navLink}>Analytics</a>
+          <a href="#/settings" style={navLink}>Settings</a>
           <a href="#/blog" style={navLink}>Blog</a>
           <a href="#/pricing" style={navLink}>Pricing</a>
           <AuthControls />

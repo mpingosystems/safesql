@@ -27,6 +27,8 @@ interface ApiKeyRow {
 export function SettingsPage() {
   const { appUser } = useAppUser();
   const isPro = !!appUser && appUser.plan !== 'free';
+  const isTeam = !!appUser && (appUser.plan === 'team' || appUser.plan === 'business');
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
   const [newKey, setNewKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -335,6 +337,18 @@ export function SettingsPage() {
 
   const curl = `curl -X POST ${SITE_URL}/api/validate \\\n  -H "Authorization: Bearer ssk_live_xxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '{"sql":"SELECT * FROM users","dialect":"postgresql"}'`;
 
+  const githubAction = `- uses: emkwambe/safesql@v1\n  with:\n    sql_files: "queries/**/*.sql"\n    schema_file: "schema/production.sql"\n    dialect: "postgresql"`;
+  const cliCmd = `npx safesql validate query.sql --schema schema.sql`;
+
+  // No self-serve delete endpoint yet — route deletion through support so the
+  // account, Stripe subscription, and Supabase rows are cleaned up together.
+  const requestDeletion = () => {
+    const email = appUser?.email ?? '';
+    window.location.href =
+      `mailto:support@safesqlpro.dev?subject=${encodeURIComponent('Account deletion request')}` +
+      `&body=${encodeURIComponent(`Please permanently delete my SafeSQL Pro account (${email}). I understand this cannot be undone.`)}`;
+  };
+
   return (
     <Shell>
       {showCheckoutSuccess && (
@@ -348,9 +362,12 @@ export function SettingsPage() {
       )}
       <h1 style={{ fontSize: 22, marginBottom: 4 }}>Settings</h1>
 
-      {/* Billing */}
-      <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 20 }}>Billing</h2>
+      {/* Account */}
+      <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 20 }}>Account</h2>
       <div style={card}>
+        <p style={{ color: '#a1a1aa', fontSize: 13, marginTop: 0, marginBottom: 8 }}>
+          Email: <strong style={{ color: '#e4e4e7' }}>{appUser?.email || '—'}</strong>
+        </p>
         <p style={{ color: '#a1a1aa', fontSize: 13, marginTop: 0 }}>
           Current plan: <strong style={{ color: '#e4e4e7' }}>{appUser ? cap(appUser.plan) : '—'}</strong>
         </p>
@@ -384,6 +401,7 @@ export function SettingsPage() {
                   Copy this key now — it won't be shown again.
                 </div>
                 <code style={keyBox}>{newKey}</code>
+                <button type="button" onClick={() => void navigator.clipboard?.writeText(newKey)} style={{ ...revokeBtn, color: '#a78bfa' }}>Copy key</button>
               </div>
             )}
           </div>
@@ -597,6 +615,49 @@ export function SettingsPage() {
           </>
         ) : (
           <p style={{ color: '#71717a', fontSize: 13 }}>Sign in to see your SafeSQL Pro Certified badge.</p>
+        )}
+      </div>
+
+      {/* Developer (Team+) */}
+      {isTeam && (
+        <>
+          <h2 style={{ fontSize: 15, color: '#a1a1aa', marginTop: 28 }}>Developer</h2>
+          <div style={card}>
+            <h3 style={{ fontSize: 13, color: '#a1a1aa', marginTop: 0 }}>GitHub Action</h3>
+            <pre style={keyBox}>{githubAction}</pre>
+            <button type="button" onClick={() => void navigator.clipboard?.writeText(githubAction)} style={{ ...revokeBtn, color: '#a78bfa' }}>Copy</button>
+
+            <h3 style={{ fontSize: 13, color: '#a1a1aa', marginTop: 18 }}>CLI</h3>
+            <pre style={keyBox}>{cliCmd}</pre>
+            <button type="button" onClick={() => void navigator.clipboard?.writeText(cliCmd)} style={{ ...revokeBtn, color: '#a78bfa' }}>Copy</button>
+
+            <h3 style={{ fontSize: 13, color: '#a1a1aa', marginTop: 18 }}>REST API</h3>
+            <pre style={keyBox}>{`POST ${SITE_URL}/api/validate`}</pre>
+            <p style={{ fontSize: 12, color: '#71717a' }}>
+              Full reference at <a href="/api-docs" style={{ color: '#a78bfa' }}>{SITE_URL}/api-docs</a>
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Danger Zone */}
+      <h2 style={{ fontSize: 15, color: '#ef4444', marginTop: 28 }}>Danger Zone</h2>
+      <div style={{ ...card, borderColor: '#7f1d1d' }}>
+        <p style={{ color: '#a1a1aa', fontSize: 13, marginTop: 0 }}>
+          Permanently delete your account and all associated data. This cannot be undone.
+        </p>
+        {!confirmDelete ? (
+          <button type="button" onClick={() => setConfirmDelete(true)} style={{ ...primaryBtn, background: '#dc2626' }}>
+            Delete account
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, color: '#fca5a5' }}>Are you sure? This is permanent.</span>
+            <button type="button" onClick={requestDeletion} style={{ ...primaryBtn, background: '#dc2626' }}>
+              Yes, delete my account
+            </button>
+            <button type="button" onClick={() => setConfirmDelete(false)} style={revokeBtn}>Cancel</button>
+          </div>
         )}
       </div>
     </Shell>

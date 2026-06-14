@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import type { SchemaDefinition, ValidationReport as Report } from '../types/validation';
 // Lazy: the demo editor loads Monaco. Deferring it lets the landing page paint
 // and Clerk initialize before Monaco's chunk + CDN runtime are fetched.
@@ -39,6 +39,12 @@ export function LandingPage() {
   const [demoSql, setDemoSql] = useState(DEMO_SQL);
   const [demoReport, setDemoReport] = useState<Report | null>(null);
 
+  // Auto-validate the demo query on mount so the JOIN-multiplication warning is
+  // visible immediately (validateSQL is deterministic + synchronous, no AI).
+  useEffect(() => {
+    setDemoReport(validateSQL({ sql: DEMO_SQL, schema: DEMO_SCHEMA, dialect: 'postgresql' }));
+  }, []);
+
   return (
     <div style={{ background: '#09090b', color: '#e4e4e7', minHeight: '100vh' }}>
       {/* NAV */}
@@ -47,7 +53,7 @@ export function LandingPage() {
           <a href="#/" style={{ fontWeight: 700, fontSize: 18, color: '#a78bfa', textDecoration: 'none' }}>
             SafeSQL Pro
           </a>
-          <span style={{ fontSize: 11, color: '#52525b' }}>v0.1.0</span>
+          <span style={{ fontSize: 11, color: '#52525b' }}>v0.8.0</span>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
           <a href="#/pricing" style={navLink}>Pricing</a>
@@ -297,10 +303,12 @@ export function PricingSection() {
           price={monthly ? '$599' : '$5,750'}
           period={monthly ? 'per month · 20 seats' : 'per year · 20 seats'}
           features={['Everything in Team', '20 seats', 'Audit log', 'Custom rules', 'CSV export', 'Slack alerts', 'SOC 2 alignment']}
-          cta={busyPlan === 'business' || !isClerkReady ? 'Loading…' : 'Contact sales'}
+          cta={busyPlan === 'business' || !isClerkReady ? 'Loading…' : 'Start with Business'}
           onUpgrade={() => void handleUpgrade('business')}
           disabled={busyPlan !== null || !isClerkReady}
           recommended={recommended === 'business'}
+          secondaryCta="Talk to sales"
+          secondaryHref="mailto:sales@safesqlpro.dev?subject=SafeSQL%20Pro%20Business"
         />
       </div>
       {error && (
@@ -337,6 +345,8 @@ interface PricingCardProps {
   highlight?: boolean;
   disabled?: boolean;
   recommended?: boolean;
+  secondaryCta?: string;
+  secondaryHref?: string;
 }
 
 function PricingCard(props: PricingCardProps) {
@@ -434,6 +444,26 @@ function PricingCard(props: PricingCardProps) {
           }}
         >
           {props.cta}
+        </a>
+      )}
+      {props.secondaryCta && props.secondaryHref && (
+        <a
+          href={props.secondaryHref}
+          style={{
+            display: 'block',
+            textAlign: 'center',
+            marginTop: 8,
+            padding: '8px 14px',
+            borderRadius: 5,
+            fontSize: 13,
+            fontWeight: 600,
+            textDecoration: 'none',
+            background: 'transparent',
+            border: '1px solid #3f3f46',
+            color: '#a1a1aa',
+          }}
+        >
+          {props.secondaryCta}
         </a>
       )}
     </div>

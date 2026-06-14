@@ -321,6 +321,9 @@ export function SettingsPage() {
       });
       if (!error) {
         setNewKey(raw);
+        // Auto-fill the schema-sync field — this is the only moment we hold the
+        // raw key (the DB stores only a SHA-256 hash + prefix, never the key).
+        setConnApiKey(raw);
         await refresh();
       }
     } finally {
@@ -641,7 +644,7 @@ export function SettingsPage() {
             <button type="button" onClick={() => void navigator.clipboard?.writeText(cliCmd)} style={{ ...revokeBtn, color: '#a78bfa' }}>Copy</button>
 
             <h3 style={{ fontSize: 13, color: '#a1a1aa', marginTop: 18 }}>REST API</h3>
-            <pre style={keyBox}>{`POST ${SITE_URL}/api/validate`}</pre>
+            <pre style={keyBox}>{`POST https://safesql.pages.dev/api/validate`}</pre>
             <p style={{ fontSize: 12, color: '#71717a' }}>
               Full reference at <a href="/api-docs" style={{ color: '#a78bfa' }}>{SITE_URL}/api-docs</a>
             </p>

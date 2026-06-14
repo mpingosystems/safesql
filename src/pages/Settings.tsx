@@ -335,7 +335,7 @@ export function SettingsPage() {
     await refresh();
   };
 
-  const curl = `curl -X POST ${SITE_URL}/api/validate \\\n  -H "Authorization: Bearer ssk_live_xxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '{"sql":"SELECT * FROM users","dialect":"postgresql"}'`;
+  const curl = `curl -X POST https://safesql.pages.dev/api/validate \\\n  -H "Authorization: Bearer ssk_live_xxxx" \\\n  -H "Content-Type: application/json" \\\n  -d '{"sql":"SELECT * FROM users","dialect":"postgresql"}'`;
 
   const githubAction = `- uses: emkwambe/safesql@v1\n  with:\n    sql_files: "queries/**/*.sql"\n    schema_file: "schema/production.sql"\n    dialect: "postgresql"`;
   const cliCmd = `npx safesql validate query.sql --schema schema.sql`;
@@ -480,14 +480,14 @@ export function SettingsPage() {
           )}
 
           <div style={{ marginTop: 14, display: 'grid', gap: 8 }}>
-            <input value={connName} onChange={(e) => setConnName(e.target.value)} placeholder="Display name (e.g. Production DB)" style={inputStyle} />
+            <input value={connName} onChange={(e) => setConnName(e.target.value)} placeholder="Display name (e.g. Production DB)" autoComplete="off" style={inputStyle} />
             <select value={connDialect} onChange={(e) => onDialectChange(e.target.value)} style={{ ...inputStyle, flex: '0 0 160px' }}>
               {SUPPORTED_DIALECTS.map((d) => <option key={d} value={d}>{d}</option>)}
               <option value="mysql" disabled>mysql (coming soon)</option>
             </select>
 
             {connDialect === 'postgresql' && (
-              <input type="password" value={connString} onChange={(e) => { setConnString(e.target.value); setConnTested(false); }} placeholder="postgresql://user:pw@host:5432/db" style={inputStyle} />
+              <input type="password" value={connString} onChange={(e) => { setConnString(e.target.value); setConnTested(false); }} placeholder="postgresql://user:pw@host:5432/db" autoComplete="new-password" style={inputStyle} />
             )}
             {connDialect === 'bigquery' && (
               <>
@@ -511,7 +511,10 @@ export function SettingsPage() {
               </>
             )}
 
-            <input type="password" value={connApiKey} onChange={(e) => setConnApiKey(e.target.value)} placeholder="Your API key (ssk_live_…) — used to encrypt + sync" style={inputStyle} />
+            <div style={{ fontSize: 11.5, color: '#71717a' }}>
+              Generate an API key above first, then use it here to authenticate schema syncs.
+            </div>
+            <input type="password" value={connApiKey} onChange={(e) => setConnApiKey(e.target.value)} placeholder="Paste an API key (ssk_live_…)" autoComplete="new-password" style={inputStyle} />
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <button type="button" onClick={testConnection} style={{ ...revokeBtn, color: '#a78bfa' }}>Test connection</button>
               <button type="button" onClick={() => void addConnection()} disabled={!connTested} style={{ ...primaryBtn, opacity: connTested ? 1 : 0.5, cursor: connTested ? 'pointer' : 'not-allowed' }}>Save</button>
@@ -565,9 +568,10 @@ export function SettingsPage() {
         </p>
         <input
           type="url"
-          placeholder="https://hooks.slack.com/services/…"
+          placeholder="Paste your Slack incoming webhook URL"
           value={webhookUrl}
           onChange={(e) => setWebhookUrl(e.target.value)}
+          autoComplete="off"
           style={{ width: '100%', background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 5, padding: '7px 10px', fontSize: 12.5 }}
         />
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
@@ -612,6 +616,11 @@ export function SettingsPage() {
             <div style={{ fontSize: 12, color: badge.certified ? '#22c55e' : '#71717a' }}>
               {badge.certified ? 'Certified ✓' : 'Not yet certified — keep validating.'}
             </div>
+            {!badge.certified && (
+              <div style={{ fontSize: 11.5, color: '#71717a', marginTop: 4 }}>
+                Validate 100+ queries and maintain an average score ≥ 85 to earn your SafeSQL Pro Certified badge.
+              </div>
+            )}
           </>
         ) : (
           <p style={{ color: '#71717a', fontSize: 13 }}>Sign in to see your SafeSQL Pro Certified badge.</p>

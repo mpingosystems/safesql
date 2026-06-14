@@ -2,11 +2,11 @@
   "openapi": "3.1.0",
   "info": {
     "title": "SafeSQL Validation API",
-    "version": "0.5.0",
+    "version": "0.8.0",
     "description": "Pre-execution semantic SQL validation. Runs the same 33-detector engine as the SafeSQL editor over HTTP — embed it in text-to-SQL pipelines and CI.",
     "contact": { "name": "SafeSQL", "url": "https://safesqlpro.dev" }
   },
-  "servers": [{ "url": "https://safesqlpro.dev" }],
+  "servers": [{ "url": "https://safesql.pages.dev" }],
   "paths": {
     "/api/validate": {
       "post": {

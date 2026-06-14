@@ -1,10 +1,5 @@
 import { error, json, methodNotAllowed, preflight, siteUrl, type Env } from '../../_shared';
-
-interface PortalBody {
-  // Clerk user id of the signed-in user. The customer id is looked up server-side
-  // so it can't be spoofed from a stale client value.
-  clerkUserId?: unknown;
-}
+import { verifyClerkJWT } from '../_shared/clerkAuth';
 
 export const onRequest: PagesFunction<Env> = async (context) => {
   if (context.request.method === 'OPTIONS') return preflight();
@@ -24,19 +19,14 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]
   if (!env.STRIPE_SECRET_KEY) return error(500, 'STRIPE_SECRET_KEY not configured.');
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return error(500, 'Supabase env not configured.');
 
-  let body: PortalBody;
-  try {
-    body = (await request.json()) as PortalBody;
-  } catch {
-    return error(400, 'Invalid JSON body.');
-  }
-  if (typeof body.clerkUserId !== 'string' || !body.clerkUserId) {
-    return error(400, 'clerkUserId is required.');
-  }
+  // Verify the Clerk session JWT — the acting user id comes from the token, not
+  // the request body (which would be spoofable). Hardening flagged since Sprint 7.
+  const clerkUserId = await verifyClerkJWT(request, env);
+  if (!clerkUserId) return error(401, 'Unauthorized');
 
-  // 1. Look up the user's Stripe customer id.
+  // 1. Look up the user's Stripe customer id (keyed on the VERIFIED clerk id).
   const lookup = await fetch(
-    `${env.SUPABASE_URL}/rest/v1/users?clerk_user_id=eq.${encodeURIComponent(body.clerkUserId)}&select=stripe_customer_id`,
+    `${env.SUPABASE_URL}/rest/v1/users?clerk_user_id=eq.${encodeURIComponent(clerkUserId)}&select=stripe_customer_id`,
     {
       headers: {
         apikey: env.SUPABASE_SERVICE_ROLE_KEY,

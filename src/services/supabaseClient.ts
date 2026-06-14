@@ -23,6 +23,18 @@ export function setSupabaseTokenSource(source: ClerkSessionLike | null): void {
   tokenSource = source;
 }
 
+// Current Clerk session JWT (or null) — the same source the Supabase client uses.
+// Lets non-Supabase callers (e.g. the billing portal) send a verifiable
+// Authorization: Bearer token without importing Clerk hooks directly.
+export async function getClerkToken(): Promise<string | null> {
+  if (!tokenSource) return null;
+  try {
+    return await tokenSource.getToken();
+  } catch {
+    return null;
+  }
+}
+
 export function getSupabase(): SupabaseClient | null {
   if (!isSupabaseConfigured) return null;
   if (client) return client;

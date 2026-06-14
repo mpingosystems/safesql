@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
-import { getSupabase, isSupabaseConfigured } from '../services/supabaseClient';
+import { getSupabase, isSupabaseConfigured, getClerkToken } from '../services/supabaseClient';
 import {
   apiKeyDisplayPrefix,
   generateApiKey,
@@ -58,9 +58,15 @@ export function SettingsPage() {
     if (!appUser?.clerkUserId || portalBusy) return;
     setPortalBusy(true);
     try {
+      // Portal now requires a verified Clerk JWT (Sprint 11 P3). Send the session
+      // token; the server derives the user from it, not the body.
+      const token = await getClerkToken();
       const res = await fetch(apiUrl('/api/stripe/portal'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ clerkUserId: appUser.clerkUserId }),
       });
       const data = (await res.json()) as { url?: string };

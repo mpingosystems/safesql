@@ -12,6 +12,10 @@ export interface Env {
   STRIPE_BUSINESS_PRICE_IDS?: string;
   // Stripe Customer Portal configuration ID (uses account default if unset).
   STRIPE_PORTAL_ID?: string;
+  // ── Clerk ────────────────────────────────────────────────────────────
+  // Frontend API domain (e.g. clerk.safesqlpro.dev) — used to fetch the JWKS
+  // for verifying Clerk session JWTs server-side (billing portal auth).
+  CLERK_DOMAIN?: string;
   // ── Site ────────────────────────────────────────────────────────────
   // Public origin for Stripe redirect URLs; defaults to https://safesqlpro.dev.
   SITE_URL?: string;

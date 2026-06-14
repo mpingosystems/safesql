@@ -16,6 +16,9 @@ export interface Env {
   // Frontend API domain (e.g. clerk.safesqlpro.dev) — used to fetch the JWKS
   // for verifying Clerk session JWTs server-side (billing portal auth).
   CLERK_DOMAIN?: string;
+  // Clerk Backend API secret (sk_live_…/sk_test_…) — used for server-side admin
+  // operations like deleting a Clerk user (self-serve account delete).
+  CLERK_SECRET_KEY?: string;
   // ── Site ────────────────────────────────────────────────────────────
   // Public origin for Stripe redirect URLs; defaults to https://safesqlpro.dev.
   SITE_URL?: string;

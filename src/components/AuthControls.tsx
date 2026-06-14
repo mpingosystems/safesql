@@ -1,4 +1,5 @@
 import { SignInButton, SignedIn, SignedOut, UserButton, useUser } from '@clerk/clerk-react';
+import { useState, useEffect } from 'react';
 
 export const isClerkConfigured = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -13,6 +14,23 @@ interface AuthControlsProps {
 }
 
 const GOOGLE_NOTICE = 'Google sign-in is being configured — please use email sign-in for now.';
+const OAUTH_FAIL_NOTICE = "Google sign-in is temporarily unavailable. Please use email sign-in instead. We're working on it.";
+
+// Clerk redirects an OAuth failure back with an error in the URL (e.g.
+// ?err_code=authorization_invalid). Detect it, log the full context for
+// debugging, and show a friendly message instead of a blank failure.
+function OAuthErrorNotice() {
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    const hay = `${window.location.search}${window.location.hash}`;
+    if (/authorization_invalid|err_code=|__clerk_status=(failed|error)/i.test(hay)) {
+      console.error('[oauth] Clerk OAuth failure detected in URL:', hay);
+      setFailed(true);
+    }
+  }, []);
+  if (!failed) return null;
+  return <span style={{ fontSize: 10.5, color: '#fca5a5', maxWidth: 220, lineHeight: 1.3 }}>{OAUTH_FAIL_NOTICE}</span>;
+}
 
 export function AuthControls({ size = 'sm', signInMode = 'modal', signInLabel = 'Sign in', googleNotice = false }: AuthControlsProps) {
   if (!isClerkConfigured) {
@@ -53,6 +71,7 @@ export function AuthControls({ size = 'sm', signInMode = 'modal', signInLabel = 
               {GOOGLE_NOTICE}
             </span>
           )}
+          <OAuthErrorNotice />
         </span>
       </SignedOut>
       <SignedIn>

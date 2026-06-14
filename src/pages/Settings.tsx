@@ -349,13 +349,32 @@ export function SettingsPage() {
   const githubAction = `- uses: emkwambe/safesql@v1\n  with:\n    sql_files: "queries/**/*.sql"\n    schema_file: "schema/production.sql"\n    dialect: "postgresql"`;
   const cliCmd = `npx safesql validate query.sql --schema schema.sql`;
 
-  // No self-serve delete endpoint yet — route deletion through support so the
-  // account, Stripe subscription, and Supabase rows are cleaned up together.
-  const requestDeletion = () => {
-    const email = appUser?.email ?? '';
-    window.location.href =
-      `mailto:support@safesqlpro.dev?subject=${encodeURIComponent('Account deletion request')}` +
-      `&body=${encodeURIComponent(`Please permanently delete my SafeSQL Pro account (${email}). I understand this cannot be undone.`)}`;
+  const [deleteText, setDeleteText] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+
+  const deleteAccount = async () => {
+    if (deleteText !== 'DELETE' || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteErr(null);
+    try {
+      const token = await getClerkToken();
+      const res = await fetch(apiUrl('/api/account/delete'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({}),
+      });
+      if (res.ok) {
+        window.location.href = 'https://safesqlpro.dev';
+      } else {
+        const d = (await res.json().catch(() => ({}))) as { error?: string };
+        setDeleteErr(d.error ?? 'Delete failed. Contact support@safesqlpro.dev.');
+        setDeleteBusy(false);
+      }
+    } catch {
+      setDeleteErr('Network error. Contact support@safesqlpro.dev.');
+      setDeleteBusy(false);
+    }
   };
 
   return (
@@ -661,21 +680,58 @@ export function SettingsPage() {
       {/* Danger Zone */}
       <h2 style={{ fontSize: 15, color: '#ef4444', marginTop: 28 }}>Danger Zone</h2>
       <div style={{ ...card, borderColor: '#7f1d1d' }}>
-        <p style={{ color: '#a1a1aa', fontSize: 13, marginTop: 0 }}>
-          Permanently delete your account and all associated data. This cannot be undone.
-        </p>
         {!confirmDelete ? (
-          <button type="button" onClick={() => setConfirmDelete(true)} style={{ ...primaryBtn, background: '#dc2626' }}>
-            Delete account
-          </button>
-        ) : (
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, color: '#fca5a5' }}>Are you sure? This is permanent.</span>
-            <button type="button" onClick={requestDeletion} style={{ ...primaryBtn, background: '#dc2626' }}>
-              Yes, delete my account
+          <>
+            <p style={{ color: '#a1a1aa', fontSize: 13, marginTop: 0 }}>
+              Permanently delete your account and all associated data. This cannot be undone.
+            </p>
+            <button type="button" onClick={() => setConfirmDelete(true)} style={{ ...primaryBtn, background: '#dc2626' }}>
+              Delete account
             </button>
-            <button type="button" onClick={() => setConfirmDelete(false)} style={revokeBtn}>Cancel</button>
-          </div>
+          </>
+        ) : (
+          <>
+            <p style={{ color: '#fca5a5', fontSize: 13, marginTop: 0, fontWeight: 600 }}>This will permanently delete:</p>
+            <ul style={{ color: '#a1a1aa', fontSize: 12.5, lineHeight: 1.7, paddingLeft: 18, marginTop: 0 }}>
+              <li>✗ Your account and all validations</li>
+              <li>✗ Your API keys and schema connections</li>
+              <li>✗ Your team data and saved queries</li>
+              <li>✗ Your active subscription (cancelled immediately)</li>
+            </ul>
+            <p style={{ color: '#a1a1aa', fontSize: 12.5 }}>
+              Type <strong style={{ color: '#e4e4e7' }}>DELETE</strong> to confirm:
+            </p>
+            <input
+              value={deleteText}
+              onChange={(e) => setDeleteText(e.target.value)}
+              placeholder="DELETE"
+              autoComplete="off"
+              style={{ width: 160, background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #7f1d1d', borderRadius: 5, padding: '6px 10px', fontSize: 13 }}
+            />
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 10, flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => void deleteAccount()}
+                disabled={deleteText !== 'DELETE' || deleteBusy}
+                style={{
+                  ...primaryBtn,
+                  background: '#dc2626',
+                  opacity: deleteText === 'DELETE' && !deleteBusy ? 1 : 0.5,
+                  cursor: deleteText === 'DELETE' && !deleteBusy ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {deleteBusy ? 'Deleting…' : 'Permanently delete my account'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setConfirmDelete(false); setDeleteText(''); setDeleteErr(null); }}
+                style={revokeBtn}
+              >
+                Cancel
+              </button>
+            </div>
+            {deleteErr && <div style={{ fontSize: 12, color: '#fca5a5', marginTop: 8 }}>{deleteErr}</div>}
+          </>
         )}
       </div>
     </Shell>

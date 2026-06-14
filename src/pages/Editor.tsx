@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   SchemaDefinition,
   SqlSource,
@@ -51,6 +51,76 @@ const navLink: React.CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
 };
+
+// Team dropdown — only rendered for Team+ plans (see nav). Custom Rules is
+// Business-only. Click to toggle, closes on outside-click or item select.
+function TeamMenu({ plan }: { plan: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+
+  const items = [
+    { label: 'Members', href: '#/team/members' },
+    { label: 'Analytics', href: '#/team/analytics' },
+    { label: 'Approvals', href: '#/team/approvals' },
+    { label: 'Audit Log', href: '#/team/audit' },
+    ...(plan === 'business' ? [{ label: 'Custom Rules', href: '#/team/rules' }] : []),
+  ];
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{ ...navLink, background: 'transparent', border: 'none', cursor: 'pointer', padding: 0 }}
+      >
+        Team ▾
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: 8,
+            minWidth: 150,
+            background: '#18181b',
+            border: '1px solid #27272a',
+            borderRadius: 8,
+            padding: 6,
+            zIndex: 20,
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          }}
+        >
+          {items.map((it) => (
+            <a
+              key={it.href}
+              href={it.href}
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              style={{ color: '#d4d4d8', textDecoration: 'none', fontSize: 12.5, padding: '6px 10px', borderRadius: 5 }}
+            >
+              {it.label}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // "Open in SafeSQL" (from a shared link) and legacy hash permalinks stash the
 // SQL here, then bounce to the editor; we pick it up once on mount.
@@ -272,6 +342,9 @@ export function EditorPage() {
           )}
           <a href="#/library" style={navLink}>Library</a>
           <a href="#/analytics" style={navLink}>Analytics</a>
+          {appUser && (appUser.plan === 'team' || appUser.plan === 'business') && (
+            <TeamMenu plan={appUser.plan} />
+          )}
           <a href="#/settings" style={navLink}>Settings</a>
           <a href="#/blog" style={navLink}>Blog</a>
           <a href="#/pricing" style={navLink}>Pricing</a>

@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  Pre-launch email for launch_subscribers. Sent by POST /api/launch/notify.
+  Placeholders (replaced server-side): {{DAYS}}, {{UPVOTE_URL}}, {{UNSUBSCRIBE_URL}}.
+  This file is the design source of truth; functions/api/launch/notify.ts inlines
+  an equivalent string — keep them in sync.
+  Subject: SafeSQL Pro launches on Product Hunt in {{DAYS}} days 🚀
+-->
+<html lang="en">
+  <body style="margin:0;background:#09090b;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e4e4e7;">
+    <div style="max-width:560px;margin:0 auto;padding:32px 24px;">
+      <h1 style="font-size:22px;color:#a78bfa;margin:0 0 4px;">SafeSQL Pro</h1>
+      <p style="font-size:13px;color:#71717a;margin:0 0 24px;">SQL that runs is the most dangerous SQL.</p>
+
+      <p style="font-size:15px;line-height:1.6;">
+        You signed up to be notified when <strong>SafeSQL Pro</strong> launches on
+        Product Hunt. It's happening in <strong>{{DAYS}} days</strong> — launch day,
+        <strong>12:01 AM PST</strong>.
+      </p>
+
+      <p style="font-size:14px;line-height:1.6;color:#d4d4d8;">SafeSQL Pro is the safety net under AI-generated SQL:</p>
+      <ul style="font-size:14px;line-height:1.7;color:#d4d4d8;padding-left:18px;">
+        <li>Catches semantic logic errors (JOIN fan-out, LEFT JOIN traps, hallucinated columns) <em>before</em> they run.</li>
+        <li>Proves it — runs your query on synthetic data and shows the actual inflated row count.</li>
+        <li>Deterministic detection: rules never hallucinate; AI only explains.</li>
+      </ul>
+
+      <p style="font-size:14px;line-height:1.6;">
+        Try it free before launch: <a href="https://safesqlpro.dev" style="color:#a78bfa;">safesqlpro.dev</a>
+      </p>
+
+      <p style="font-size:14px;line-height:1.6;color:#d4d4d8;">
+        On launch day, your upvote matters more than you think — early upvotes in the
+        first hour determine the day's ranking.
+      </p>
+
+      <p style="margin:24px 0;">
+        <a href="{{UPVOTE_URL}}" style="display:inline-block;background:#7c3aed;color:#fff;text-decoration:none;font-weight:600;font-size:14px;padding:11px 20px;border-radius:6px;">
+          Upvote on Product Hunt →
+        </a>
+      </p>
+
+      <p style="font-size:11px;color:#52525b;margin-top:32px;">
+        SafeSQL Pro · Mpingo Systems LLC ·
+        <a href="{{UNSUBSCRIBE_URL}}" style="color:#52525b;">Unsubscribe</a>
+      </p>
+    </div>
+  </body>
+</html>

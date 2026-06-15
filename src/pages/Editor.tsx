@@ -14,7 +14,7 @@ import { SaveQueryButton } from '../components/SaveQueryButton';
 import { validateSQL } from '../services/sqlValidator';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
 import { persistValidation } from '../services/persistValidation';
-import { applyFix } from '../services/applyFix';
+import { applyFix, canApplyFix } from '../services/applyFix';
 import { AuthControls } from '../components/AuthControls';
 import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
 import { useTeam } from '../hooks/useTeam';
@@ -255,6 +255,34 @@ export function EditorPage() {
     },
     [sql, schema, dialect, source, appUser, overLimit, activeSchemaId, refreshAppUser],
   );
+
+  // "Fix Issues First" — apply every auto-fixable error in one pass, then
+  // re-validate. canApplyFix gates which errors have a deterministic rewrite
+  // (only those are applied; the rest still need a manual fix).
+  const handleFixIssues = useCallback(() => {
+    if (!report) return;
+    let next = sql;
+    for (const issue of report.errors.filter(canApplyFix)) {
+      const fixed = applyFix(next, issue);
+      if (fixed && fixed !== next) next = fixed;
+    }
+    if (next === sql) return;
+    setSql(next);
+    const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source });
+    setReport(nextReport);
+    setLastValidatedAt(new Date());
+    if (appUser?.id && !overLimit) {
+      void persistValidation({
+        appUserId: appUser.id,
+        sql: next,
+        report: nextReport,
+        schemaId: activeSchemaId ?? undefined,
+        dialect,
+      }).then((ok) => {
+        if (ok) void refreshAppUser();
+      });
+    }
+  }, [report, sql, schema, dialect, source, appUser, overLimit, activeSchemaId, refreshAppUser]);
 
   const handleValidationFromEditor = (next: Report) => {
     setReport(next);
@@ -505,6 +533,7 @@ export function EditorPage() {
           dialect={dialect}
           isPro={isPro}
           onApplyFix={handleApplyFix}
+          onFixIssues={handleFixIssues}
           onRequestApproval={team ? () => { setApprovalMsg(null); setApprovalOpen(true); } : undefined}
         />
       </aside>

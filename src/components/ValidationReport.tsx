@@ -8,6 +8,7 @@ import { RiskScore } from './RiskScore';
 import { IssueCard } from './IssueCard';
 import { ProofPanel } from './ProofPanel';
 import { createSharedValidation } from '../services/sharedValidation';
+import { canApplyFix } from '../services/applyFix';
 
 interface ValidationReportProps {
   report: Report | null;
@@ -212,13 +213,34 @@ export function ValidationReport({
 
       <div style={{ padding: 12, borderTop: '1px solid #27272a' }}>
         {report.errors.length > 0 ? (
-          <button
-            type="button"
-            onClick={onFixIssues}
-            style={{ ...actionBtn, background: '#dc2626', color: 'white' }}
-          >
-            Fix Issues First
-          </button>
+          (() => {
+            const fixableCount = report.errors.filter(canApplyFix).length;
+            // Active only when there are auto-fixable errors and the editor wired
+            // a handler (read-only views like the share page pass none). The
+            // current fixable rule (NULL_EQUALITY) needs no schema DDL.
+            const canFix = fixableCount > 0 && !!onFixIssues;
+            return (
+              <button
+                type="button"
+                onClick={canFix ? onFixIssues : undefined}
+                disabled={!canFix}
+                title={
+                  canFix
+                    ? `Auto-fix ${fixableCount} error${fixableCount > 1 ? 's' : ''} and re-validate`
+                    : 'These errors need a manual fix — see each issue’s suggested fix above'
+                }
+                style={{
+                  ...actionBtn,
+                  background: '#dc2626',
+                  color: 'white',
+                  opacity: canFix ? 1 : 0.55,
+                  cursor: canFix ? 'pointer' : 'not-allowed',
+                }}
+              >
+                {canFix ? `⚡ Fix ${fixableCount} Issue${fixableCount > 1 ? 's' : ''}` : 'Fix Issues First'}
+              </button>
+            );
+          })()
         ) : report.riskScore >= 85 ? (
           <button
             type="button"

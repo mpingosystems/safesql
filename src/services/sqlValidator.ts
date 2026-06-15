@@ -137,16 +137,14 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
 // High-risk warnings land in the 41-69 band; everything else warning-level is a
 // "medium" warning in the 70-84 band. This is the §11 Score Policy made concrete.
 //
-// Sprint 3b decision: AGGREGATE_OVER_FANOUT_JOIN (and NOT_IN_NULLABLE) stay
-// WARNINGS in the 41-69 band. The Sprint 3 prompt's §3 prose called fan-out an
-// "error <50", but the SAME prompt's §11 score-policy table classifies fan-out
-// as a high-risk *warning* (41-69) — and that policy is the one that shipped and
-// is tested. The table wins; fan-out remains a high-risk warning (scores ~60).
+// NOTE: AGGREGATE_OVER_FANOUT_JOIN was previously a high-risk warning here, but a
+// SUM/AVG over a fan-out join silently inflates the measure 2-10x — a critical
+// data-integrity failure, not a "review". It is now emitted as an ERROR (0-40
+// band) and so no longer belongs in this warning set.
 const HIGH_RISK_WARNINGS = new Set<DetectorId>([
   'LEFT_JOIN_FILTERED_IN_WHERE',
   'SUSPICIOUS_JOIN_KEY',
   'CROSS_JOIN_RISK',
-  'AGGREGATE_OVER_FANOUT_JOIN',
   'MULTIPLE_ONE_TO_MANY_JOINS',
   'SCD_JOIN_WITHOUT_EFFECTIVE_DATE',
   'MISSING_TIME_FILTER',
@@ -1435,7 +1433,11 @@ function detectFanOutJoins(ast: any): ValidationIssue[] {
       const offending = children.find((t) => t !== measure!.table) ?? children[1];
       issues.push({
         id: 'AGGREGATE_OVER_FANOUT_JOIN',
-        severity: 'warning',
+        // ERROR, not warning: a SUM/AVG over a fan-out join silently inflates the
+        // measure 2-10x. That is a critical data-integrity failure (wrong revenue,
+        // wrong totals) — it belongs in the 0-40 hard-error band, not the 41-69
+        // "review" band. See calculateRiskScore.
+        severity: 'error',
         title: `${measure.func}(${measure.column}) is inflated by the join to "${offending}"`,
         description: `Joining "${offending}" alongside "${measure.table}" duplicates each "${measure.table}" row once per matching "${offending}" row, so ${measure.func}(${measure.column}) is multiplied.`,
         fix: `Pre-aggregate "${measure.table}" before joining: WITH agg AS (SELECT <fk>, ${measure.func}(${measure.column}) AS v FROM ${measure.table} GROUP BY <fk>) then join agg and "${offending}" separately.`,

@@ -209,7 +209,7 @@ export function ValidationReport({
       </div>
 
       {/* PQ2 — synthetic proof renders only when a fan-out/grain issue exists */}
-      <ProofPanel report={report} sql={sql ?? ''} ddl={ddl ?? ''} schema={schema ?? null} />
+      <ProofPanel report={report} sql={sql ?? ''} ddl={ddl ?? ''} schema={schema ?? null} dialect={dialect ?? 'postgresql'} />
 
       <div style={{ padding: 12, borderTop: '1px solid #27272a' }}>
         {report.errors.length > 0 ? (

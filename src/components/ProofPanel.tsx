@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { SandboxResult, SchemaDefinition, ValidationReport } from '../types/validation';
 import { runSandbox } from '../services/sandboxRunner';
+import { buildFanoutProofQuery } from '../services/fanoutProof';
 
 // PQ2 — RealityDB synthetic proof panel. When a fan-out / grain issue is
 // detected, developers are skeptical until they see the inflated row count on
@@ -19,6 +20,7 @@ interface ProofPanelProps {
   sql: string;
   ddl: string;
   schema: SchemaDefinition | null;
+  dialect?: string;
 }
 
 // Scale child tables above their parents so the many-to-one fan-out is actually
@@ -35,8 +37,9 @@ function rowsForSchema(schema: SchemaDefinition): Record<string, number> {
   return map;
 }
 
-export function ProofPanel({ report, sql, ddl, schema }: ProofPanelProps) {
+export function ProofPanel({ report, sql, ddl, schema, dialect = 'postgresql' }: ProofPanelProps) {
   const [result, setResult] = useState<SandboxResult | null>(null);
+  const [cardinality, setCardinality] = useState<{ joined: number; grain: number; factTable: string } | null>(null);
   const [running, setRunning] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -51,17 +54,30 @@ export function ProofPanel({ report, sql, ddl, schema }: ProofPanelProps) {
     setRunning(true);
     setErr(null);
     setResult(null);
+    setCardinality(null);
     try {
-      // FK-aware synthetic dataset (child tables outnumber parents) so fan-out
-      // is realistic and visible — e.g. ~50 customers, 150 subscriptions, 450
-      // payments for the demo schema.
-      const res = await runSandbox({
-        ddl,
-        sql,
-        schema,
-        rowsPerTable: rowsForSchema(schema),
-        seed: 7,
-      });
+      // FK-aware synthetic dataset (child tables outnumber parents) so the
+      // many-to-one fan-out is realistic — e.g. ~50 customers, 150 subscriptions,
+      // 450 payments for the demo schema.
+      const rows = rowsForSchema(schema);
+
+      // Preferred proof: an aggregated query (GROUP BY) hides the multiplication
+      // in SUM, not the row count. So count the joined rows vs the distinct fact
+      // rows — the ratio is exactly the factor by which SUM(<fact>) is inflated.
+      const proof = buildFanoutProofQuery(sql, schema, dialect);
+      if (proof) {
+        const res = await runSandbox({ ddl, sql: proof.countQuery, schema, rowsPerTable: rows, seed: 7 });
+        const row = res.rows[0] as { joined_rows?: unknown; grain_rows?: unknown } | undefined;
+        const joined = Number(row?.joined_rows);
+        const grain = Number(row?.grain_rows);
+        if (!res.executionError && Number.isFinite(joined) && Number.isFinite(grain) && grain > 0) {
+          setCardinality({ joined, grain, factTable: proof.factTable });
+          return;
+        }
+      }
+
+      // Fallback: run the user's query as-is and show rows returned.
+      const res = await runSandbox({ ddl, sql, schema, rowsPerTable: rows, seed: 7 });
       setResult(res);
     } catch (e) {
       setErr((e as Error).message);
@@ -71,6 +87,7 @@ export function ProofPanel({ report, sql, ddl, schema }: ProofPanelProps) {
   };
 
   const flag = result?.rowCountFlag;
+  const inflation = cardinality ? cardinality.joined / Math.max(1, cardinality.grain) : 0;
 
   return (
     <div
@@ -124,6 +141,22 @@ export function ProofPanel({ report, sql, ddl, schema }: ProofPanelProps) {
         </div>
 
         {err && <div style={{ color: '#ef4444', marginTop: 8 }}>Sandbox error: {err}</div>}
+
+        {cardinality && !err && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', gap: 8, fontVariantNumeric: 'tabular-nums' }}>
+              <Stat label={`Real ${cardinality.factTable} rows`} value={String(cardinality.grain)} accent="#22c55e" />
+              <Stat label="Rows the SUM sees" value={String(cardinality.joined)} accent="#ef4444" />
+              <Stat label="Inflation" value={`${inflation.toFixed(1)}×`} accent="#f59e0b" />
+            </div>
+            <div style={{ marginTop: 8, color: '#d4d4d8' }}>
+              The JOIN multiplied <code style={{ color: '#a78bfa' }}>{cardinality.factTable}</code> by{' '}
+              {inflation.toFixed(1)}× — {cardinality.grain} real rows became {cardinality.joined}. Any{' '}
+              <code style={{ color: '#a78bfa' }}>SUM</code> over {cardinality.factTable} is inflated by that
+              factor. Pre-aggregate {cardinality.factTable} before joining.
+            </div>
+          </div>
+        )}
 
         {result && !err && (
           <div style={{ marginTop: 10 }}>

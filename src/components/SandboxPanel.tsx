@@ -4,6 +4,7 @@ import { runSandbox } from '../services/sandboxRunner';
 import { persistSandboxRun } from '../services/persistSandboxRun';
 import { FREE_LIMITS, isOverSandboxLimit, useAppUser } from '../hooks/useAppUser';
 import { AtelierCrossSell } from './AtelierCrossSell';
+import { formatCell } from './formatCell';
 
 interface SandboxPanelProps {
   sql: string;
@@ -264,12 +265,6 @@ function SampleTable({ rows }: { rows: Record<string, unknown>[] }) {
       </table>
     </div>
   );
-}
-
-function formatCell(v: unknown): string {
-  if (v === null || v === undefined) return 'NULL';
-  if (typeof v === 'object') return JSON.stringify(v);
-  return String(v);
 }
 
 const panel: React.CSSProperties = {

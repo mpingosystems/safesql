@@ -12,6 +12,7 @@ import { SandboxPanel } from '../components/SandboxPanel';
 import { UpgradeBanner } from '../components/UpgradeBanner';
 import { SaveQueryButton } from '../components/SaveQueryButton';
 import { validateSQL } from '../services/sqlValidator';
+import { parseDDL } from '../services/schemaParser';
 import { enrichWithAIExplanations } from '../services/aiExplainer';
 import { persistValidation } from '../services/persistValidation';
 import { applyFix, canApplyFix } from '../services/applyFix';
@@ -38,12 +39,47 @@ function loadInitialDialect(): Dialect {
   return 'postgresql';
 }
 
-const DEFAULT_SQL = `-- Paste your SQL here, then press Ctrl+S to validate
-SELECT u.id, u.email, SUM(o.amount) AS total
-FROM users u
-JOIN orders o ON u.id = o.user_id
-JOIN order_items oi ON o.id = oi.order_id;
-`;
+const DEFAULT_SQL = `-- Monthly revenue by plan — for the board deck
+-- Looks right. Ran without errors. Numbers are wrong by 3-10x.
+SELECT
+  c.plan,
+  DATE_TRUNC('month', p.paid_at) AS month,
+  SUM(p.amount) AS total_revenue,
+  COUNT(DISTINCT c.id) AS paying_customers
+FROM customers c
+JOIN subscriptions s ON s.customer_id = c.id
+JOIN payments p ON p.customer_id = c.id
+WHERE p.status = 'succeeded'
+  AND p.paid_at >= '2026-01-01'
+GROUP BY c.plan, DATE_TRUNC('month', p.paid_at)
+ORDER BY month DESC, total_revenue DESC;`;
+
+const DEFAULT_DDL = `CREATE TABLE customers (
+  id UUID PRIMARY KEY,
+  email TEXT NOT NULL,
+  country TEXT,
+  plan TEXT CHECK (plan IN ('free','pro','business')),
+  created_at DATE
+);
+
+CREATE TABLE subscriptions (
+  id UUID PRIMARY KEY,
+  customer_id UUID REFERENCES customers(id),
+  plan TEXT,
+  amount NUMERIC(10,2),
+  status TEXT CHECK (status IN ('active','cancelled','past_due')),
+  started_at DATE,
+  cancelled_at DATE
+);
+
+CREATE TABLE payments (
+  id UUID PRIMARY KEY,
+  subscription_id UUID REFERENCES subscriptions(id),
+  customer_id UUID REFERENCES customers(id),
+  amount NUMERIC(10,2),
+  status TEXT CHECK (status IN ('succeeded','failed','refunded')),
+  paid_at DATE
+);`;
 
 const navLink: React.CSSProperties = {
   color: '#a1a1aa',
@@ -140,7 +176,7 @@ function loadInitialSql(): string {
 
 // Query Library "open in editor" stashes the schema DDL here alongside the SQL.
 function loadInitialDdl(): string {
-  if (typeof window === 'undefined') return '';
+  if (typeof window === 'undefined') return DEFAULT_DDL;
   try {
     const preload = window.sessionStorage.getItem('safesql.preloadDdl');
     if (preload) {
@@ -150,13 +186,21 @@ function loadInitialDdl(): string {
   } catch {
     // sessionStorage may be unavailable
   }
-  return '';
+  return DEFAULT_DDL;
 }
 
 export function EditorPage() {
   const [sql, setSql] = useState(loadInitialSql);
   const [ddl, setDdl] = useState(loadInitialDdl);
-  const [schema, setSchema] = useState<SchemaDefinition | null>(null);
+  // Parse the initial DDL (the pre-loaded demo, or a Query Library preload) so
+  // the schema panel is populated and the auto-validate below has cardinality.
+  const [schema, setSchema] = useState<SchemaDefinition | null>(() => {
+    try {
+      return ddl.trim() ? parseDDL(ddl) : null;
+    } catch {
+      return null;
+    }
+  });
   const [activeSchemaId, setActiveSchemaId] = useState<string | null>(null);
   const [dialect, setDialect] = useState<Dialect>(loadInitialDialect);
 
@@ -172,6 +216,18 @@ export function EditorPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [lastValidatedAt, setLastValidatedAt] = useState<Date | null>(null);
   const [clearSignal, setClearSignal] = useState(0);
+
+  // Auto-validate the pre-loaded demo on first mount so a visitor immediately
+  // sees the fan-out detection. Local + deterministic — not persisted, doesn't
+  // count against the user's monthly quota.
+  useEffect(() => {
+    if (sql.trim()) {
+      setReport(validateSQL({ sql, schema: schema ?? undefined, dialect, source }));
+      setLastValidatedAt(new Date());
+    }
+    // run once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const { appUser, refresh: refreshAppUser } = useAppUser();
   const { team } = useTeam();

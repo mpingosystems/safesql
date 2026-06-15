@@ -11,26 +11,46 @@ import { AuthControls } from '../components/AuthControls';
 import { useAppUser } from '../hooks/useAppUser';
 import { ROICalculator, type RecommendedTier } from '../components/ROICalculator';
 
-const DEMO_SQL = `SELECT u.id, u.email, SUM(o.amount) AS total_revenue
-FROM users u
-JOIN orders o ON u.id = o.user_id
-JOIN order_items oi ON o.id = oi.order_id;`;
+const DEMO_SQL = `-- Monthly revenue by plan — for the board deck
+-- Looks right. Ran without errors. Numbers are wrong by 3-10x.
+SELECT
+  c.plan,
+  DATE_TRUNC('month', p.paid_at) AS month,
+  SUM(p.amount) AS total_revenue,
+  COUNT(DISTINCT c.id) AS paying_customers
+FROM customers c
+JOIN subscriptions s ON s.customer_id = c.id
+JOIN payments p ON p.customer_id = c.id
+WHERE p.status = 'succeeded'
+  AND p.paid_at >= '2026-01-01'
+GROUP BY c.plan, DATE_TRUNC('month', p.paid_at)
+ORDER BY month DESC, total_revenue DESC;`;
 
-const DEMO_DDL = `CREATE TABLE users (
+const DEMO_DDL = `CREATE TABLE customers (
   id UUID PRIMARY KEY,
-  email TEXT NOT NULL
+  email TEXT NOT NULL,
+  country TEXT,
+  plan TEXT CHECK (plan IN ('free','pro','business')),
+  created_at DATE
 );
 
-CREATE TABLE orders (
+CREATE TABLE subscriptions (
   id UUID PRIMARY KEY,
-  user_id UUID REFERENCES users(id),
-  amount NUMERIC NOT NULL
+  customer_id UUID REFERENCES customers(id),
+  plan TEXT,
+  amount NUMERIC(10,2),
+  status TEXT CHECK (status IN ('active','cancelled','past_due')),
+  started_at DATE,
+  cancelled_at DATE
 );
 
-CREATE TABLE order_items (
+CREATE TABLE payments (
   id UUID PRIMARY KEY,
-  order_id UUID REFERENCES orders(id),
-  price NUMERIC NOT NULL
+  subscription_id UUID REFERENCES subscriptions(id),
+  customer_id UUID REFERENCES customers(id),
+  amount NUMERIC(10,2),
+  status TEXT CHECK (status IN ('succeeded','failed','refunded')),
+  paid_at DATE
 );`;
 
 const DEMO_SCHEMA: SchemaDefinition = parseDDL(DEMO_DDL);

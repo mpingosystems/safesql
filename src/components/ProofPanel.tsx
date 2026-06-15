@@ -21,6 +21,20 @@ interface ProofPanelProps {
   schema: SchemaDefinition | null;
 }
 
+// Scale child tables above their parents so the many-to-one fan-out is actually
+// present in the synthetic data (a flat row count per table can't multiply).
+// Root tables (no FK) get the base; each FK roughly triples the count.
+// e.g. customers(0)→50, subscriptions(1)→150, payments(2)→450.
+function rowsForSchema(schema: SchemaDefinition): Record<string, number> {
+  const BASE = 50;
+  const map: Record<string, number> = {};
+  for (const t of schema.tables) {
+    const fkCount = t.columns.filter((c) => c.isFK).length;
+    map[t.name] = BASE * Math.pow(3, Math.min(fkCount, 3));
+  }
+  return map;
+}
+
 export function ProofPanel({ report, sql, ddl, schema }: ProofPanelProps) {
   const [result, setResult] = useState<SandboxResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -38,13 +52,14 @@ export function ProofPanel({ report, sql, ddl, schema }: ProofPanelProps) {
     setErr(null);
     setResult(null);
     try {
-      // Small, fixed synthetic dataset: a parent with several children per row
-      // is enough to make fan-out visible without a heavy generation.
+      // FK-aware synthetic dataset (child tables outnumber parents) so fan-out
+      // is realistic and visible — e.g. ~50 customers, 150 subscriptions, 450
+      // payments for the demo schema.
       const res = await runSandbox({
         ddl,
         sql,
         schema,
-        rowsPerTable: 12,
+        rowsPerTable: rowsForSchema(schema),
         seed: 7,
       });
       setResult(res);

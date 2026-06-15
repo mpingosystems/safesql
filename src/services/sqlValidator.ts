@@ -262,17 +262,26 @@ function detectIncompleteGroupBy(ast: any, dialect?: string): ValidationIssue[] 
     const hasAgg = stmt.columns.some((col: any) => isAggregateExpr(col.expr));
     if (!hasAgg) continue;
 
-    const nonAggCols: string[] = stmt.columns
+    const groupByItems: any[] = stmt.groupby?.columns ?? stmt.groupby ?? [];
+
+    // Signature of an expression: the column name for a plain ref, else a
+    // structural JSON of the node. This lets a SELECT expression (e.g.
+    // DATE_TRUNC('month', paid_at) AS month) match the SAME expression in GROUP
+    // BY instead of false-positiving on the alias — a very common analytics
+    // pattern (DATE_TRUNC / COALESCE / CASE grouped + selected).
+    const sigOf = (node: any): string => getColumnName(node) ?? JSON.stringify(node);
+    const groupBySigs = new Set<string>(groupByItems.map(sigOf));
+
+    const missing = stmt.columns
       .filter((col: any) => !isAggregateExpr(col.expr) && col.expr?.type !== 'star')
+      .filter((col: any) => !groupBySigs.has(sigOf(col.expr)))
       .map((col: any) => getColumnName(col.expr) ?? col.as)
       .filter(Boolean);
 
-    const groupByItems: any[] = stmt.groupby?.columns ?? stmt.groupby ?? [];
+    // Column names only, for the fix-suggestion text.
     const groupByCols: string[] = groupByItems
       .map((g: any) => getColumnName(g))
       .filter((s: string | null): s is string => typeof s === 'string');
-
-    const missing = nonAggCols.filter((c) => !groupByCols.includes(c));
 
     if (missing.length > 0) {
       issues.push({

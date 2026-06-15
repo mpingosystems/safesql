@@ -52,7 +52,7 @@ JOIN payments p ON p.customer_id = c.id
 WHERE p.status = 'succeeded'
   AND p.paid_at >= '2026-01-01'
 GROUP BY c.plan, DATE_TRUNC('month', p.paid_at)
-ORDER BY month DESC, total_revenue DESC;`;
+ORDER BY DATE_TRUNC('month', p.paid_at) DESC, total_revenue DESC;`;
 
 const DEFAULT_DDL = `CREATE TABLE customers (
   id UUID PRIMARY KEY,
@@ -158,45 +158,38 @@ function TeamMenu({ plan }: { plan: string }) {
   );
 }
 
-// "Open in SafeSQL" (from a shared link) and legacy hash permalinks stash the
-// SQL here, then bounce to the editor; we pick it up once on mount.
-function loadInitialSql(): string {
-  if (typeof window === 'undefined') return DEFAULT_SQL;
+// Consume a one-shot preload (Query Library "open in editor", shared link, or
+// legacy hash permalink). Returns the value and clears it, or null if absent.
+function takePreload(key: string): string | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const preload = window.sessionStorage.getItem('safesql.preloadSql');
-    if (preload) {
-      window.sessionStorage.removeItem('safesql.preloadSql');
-      return preload;
+    const v = window.sessionStorage.getItem(key);
+    if (v) {
+      window.sessionStorage.removeItem(key);
+      return v;
     }
   } catch {
     // sessionStorage may be unavailable
   }
-  return DEFAULT_SQL;
-}
-
-// Query Library "open in editor" stashes the schema DDL here alongside the SQL.
-function loadInitialDdl(): string {
-  if (typeof window === 'undefined') return DEFAULT_DDL;
-  try {
-    const preload = window.sessionStorage.getItem('safesql.preloadDdl');
-    if (preload) {
-      window.sessionStorage.removeItem('safesql.preloadDdl');
-      return preload;
-    }
-  } catch {
-    // sessionStorage may be unavailable
-  }
-  return DEFAULT_DDL;
+  return null;
 }
 
 export function EditorPage() {
-  const [sql, setSql] = useState(loadInitialSql);
-  const [ddl, setDdl] = useState(loadInitialDdl);
-  // Parse the initial DDL (the pre-loaded demo, or a Query Library preload) so
-  // the schema panel is populated and the auto-validate below has cardinality.
+  // Resolve the initial SQL/DDL once. isDemo is true only when nothing was
+  // preloaded — i.e. the pristine demo, which gets the "Validate" CTA and no
+  // auto-validation. A user opening their own saved query gets neither.
+  const [initial] = useState(() => {
+    const preSql = takePreload('safesql.preloadSql');
+    const preDdl = takePreload('safesql.preloadDdl');
+    return { sql: preSql ?? DEFAULT_SQL, ddl: preDdl ?? DEFAULT_DDL, isDemo: preSql === null };
+  });
+  const isDemo = initial.isDemo;
+  const [sql, setSql] = useState(initial.sql);
+  const [ddl, setDdl] = useState(initial.ddl);
+  // Parse the initial DDL so the schema panel is populated for the visitor.
   const [schema, setSchema] = useState<SchemaDefinition | null>(() => {
     try {
-      return ddl.trim() ? parseDDL(ddl) : null;
+      return initial.ddl.trim() ? parseDDL(initial.ddl) : null;
     } catch {
       return null;
     }
@@ -216,18 +209,6 @@ export function EditorPage() {
   const [report, setReport] = useState<Report | null>(null);
   const [lastValidatedAt, setLastValidatedAt] = useState<Date | null>(null);
   const [clearSignal, setClearSignal] = useState(0);
-
-  // Auto-validate the pre-loaded demo on first mount so a visitor immediately
-  // sees the fan-out detection. Local + deterministic — not persisted, doesn't
-  // count against the user's monthly quota.
-  useEffect(() => {
-    if (sql.trim()) {
-      setReport(validateSQL({ sql, schema: schema ?? undefined, dialect, source }));
-      setLastValidatedAt(new Date());
-    }
-    // run once on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const { appUser, refresh: refreshAppUser } = useAppUser();
   const { team } = useTeam();
@@ -581,6 +562,30 @@ export function EditorPage() {
           flexDirection: 'column',
         }}
       >
+        {isDemo && !report && (
+          <div style={{ padding: 16, borderBottom: '1px solid #27272a', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: '#a1a1aa', marginBottom: 10 }}>
+              A "revenue by plan" report — it looks right and runs without errors. Is it?
+            </div>
+            <button
+              type="button"
+              className="safesql-pulse"
+              onClick={() => void runValidation()}
+              style={{
+                background: '#7c3aed',
+                color: 'white',
+                border: 'none',
+                borderRadius: 6,
+                padding: '11px 18px',
+                fontWeight: 700,
+                fontSize: 14,
+                cursor: 'pointer',
+              }}
+            >
+              ▶ Validate this query — see what's wrong
+            </button>
+          </div>
+        )}
         <ValidationReport
           report={report}
           sql={sql}

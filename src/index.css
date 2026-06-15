@@ -7,6 +7,20 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Pulsing glow for the demo "Validate this query" CTA (Editor). */
+@keyframes safesql-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.55);
+  }
+  50% {
+    box-shadow: 0 0 0 9px rgba(124, 58, 237, 0);
+  }
+}
+.safesql-pulse {
+  animation: safesql-pulse 1.6s ease-out infinite;
+}
+
 * {
   box-sizing: border-box;
 }

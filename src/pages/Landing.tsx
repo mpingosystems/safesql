@@ -24,7 +24,7 @@ JOIN payments p ON p.customer_id = c.id
 WHERE p.status = 'succeeded'
   AND p.paid_at >= '2026-01-01'
 GROUP BY c.plan, DATE_TRUNC('month', p.paid_at)
-ORDER BY month DESC, total_revenue DESC;`;
+ORDER BY DATE_TRUNC('month', p.paid_at) DESC, total_revenue DESC;`;
 
 const DEMO_DDL = `CREATE TABLE customers (
   id UUID PRIMARY KEY,

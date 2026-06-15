@@ -77,6 +77,11 @@ describe('D3: INCOMPLETE_GROUP_BY', () => {
     const r = v('SELECT user_id, amount FROM orders');
     expect(r.errors.find((e) => e.id === 'INCOMPLETE_GROUP_BY')).toBeUndefined();
   });
+
+  it('passes when a selected expression is grouped by the same expression (no alias false positive)', () => {
+    const r = v("SELECT DATE_TRUNC('month', paid_at) AS month, SUM(amount) FROM payments GROUP BY DATE_TRUNC('month', paid_at)");
+    expect(r.errors.find((e) => e.id === 'INCOMPLETE_GROUP_BY')).toBeUndefined();
+  });
 });
 
 describe('D4: CONTRADICTORY_FILTER', () => {

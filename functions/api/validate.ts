@@ -9,7 +9,11 @@ import {
 } from '../../src/services/fileValidation';
 import { looksLikeDbtManifest, type DbtArtifactInput } from '../../src/services/dbtArtifacts';
 import { hashApiKey, PLAN_API_LIMITS } from '../../src/services/apiKeys';
+import { appendAuditEvent, validationRunPayload, type AuditActorRole, type AuditEventInput } from '../../src/services/auditChain';
+import { membershipOf } from './teams/_shared';
 import type { PlanTier } from '../../src/config/detectorTiers';
+import type { ValidationReport } from '../../src/types/validation';
+import { DETECTOR_VERSION } from '../../src/config/detectorVersion';
 
 // Sprint 7 Part 3 — REST API. POST /api/validate runs the same 35-detector
 // engine server-side, behind Bearer API-key auth + per-plan monthly rate limits.
@@ -18,7 +22,6 @@ import type { PlanTier } from '../../src/config/detectorTiers';
 // deps, so it's unit-testable without a live Supabase. onRequestPost wires the
 // Supabase service-role-backed deps for the Workers runtime.
 
-const DETECTOR_VERSION = '0.10.0';
 
 // Sprint 8 (dbt) — the request may carry parsed dbt artifacts. A real
 // manifest.json is 1–20 MB, so the body cap is generous but finite. Enforced
@@ -49,12 +52,55 @@ export interface AuthResult {
   ok: boolean;
   plan?: string;
   userId?: string;
+  // Sprint 9 (compliance) — lets the handler attribute a chain event to the
+  // key owner's team. Optional: existing deps/tests never set it.
+  clerkUserId?: string;
+  keyPrefix?: string;
 }
 
 export interface ValidateDeps {
   authenticate(token: string | null): Promise<AuthResult>;
   // false → over the monthly limit.
   checkUsage(userId: string, plan: string): Promise<{ ok: boolean }>;
+  // Sprint 9 (compliance) — optional. When present, the handler records a
+  // validation_run chain event after the response is computed. It is awaited
+  // inside a try/catch that swallows everything, so it can never change the
+  // status, body or success of the validation itself.
+  recordEvent?(input: Omit<AuditEventInput, 'teamId' | 'actorRole'> & { clerkUserId: string }): Promise<void>;
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// Fire-and-forget chain write for API-key validations. Never throws.
+async function recordValidationRun(
+  deps: ValidateDeps,
+  auth: AuthResult,
+  report: ValidationReport,
+  meta: { sql: string; dialect: string; tier: string; dbt?: { currentModel?: string; sensitiveTagged: number } },
+): Promise<void> {
+  if (!deps.recordEvent || !auth.clerkUserId) return;
+  try {
+    const payload = validationRunPayload(report, {
+      validationId: null,
+      sqlHash: await sha256Hex(meta.sql),
+      dialect: meta.dialect,
+      surface: 'api',
+      tier: meta.tier,
+      detectorVersion: DETECTOR_VERSION,
+      dbt: meta.dbt,
+    });
+    await deps.recordEvent({
+      clerkUserId: auth.clerkUserId,
+      eventType: 'validation_run',
+      actor: `api:${auth.keyPrefix ?? 'unknown'}`,
+      payload,
+    });
+  } catch (e) {
+    console.warn('chain event not recorded', (e as Error).message);
+  }
 }
 
 function bearerToken(request: Request): string | null {
@@ -130,6 +176,10 @@ export async function handleValidate(request: Request, deps: ValidateDeps): Prom
     const dbt = prepareDbtContext(artifacts);
     const currentModel = typeof d.currentModel === 'string' && d.currentModel ? d.currentModel : undefined;
     const report = validateSqlWithDbt(body.sql, dbt, ddl, dialect, tier, currentModel);
+    await recordValidationRun(deps, auth, report, {
+      sql: body.sql, dialect, tier,
+      dbt: { currentModel, sensitiveTagged: summarizeDbtContext(dbt.context).sensitiveTagged },
+    });
     return jsonRes(
       {
         ...report,
@@ -144,6 +194,7 @@ export async function handleValidate(request: Request, deps: ValidateDeps): Prom
   }
 
   const report = validateSqlSource(body.sql, ddl, dialect, tier);
+  await recordValidationRun(deps, auth, report, { sql: body.sql, dialect, tier });
   return jsonRes({ ...report, tier, detectorVersion: DETECTOR_VERSION }, 200);
 }
 
@@ -168,19 +219,44 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       // is the live value the billing webhook maintains, so join through to it.
       const { data } = await supabase
         .from('api_keys')
-        .select('user_id, revoked_at, users!inner(plan)')
+        .select('user_id, revoked_at, users!inner(plan, clerk_user_id)')
         .eq('key_hash', keyHash)
         .maybeSingle();
       if (!data || data.revoked_at) return { ok: false };
       // supabase-js types an embedded to-one relation as an array in some
       // versions; normalise both shapes.
-      const embedded = (data as { users?: { plan?: string } | { plan?: string }[] }).users;
-      const livePlan = (Array.isArray(embedded) ? embedded[0]?.plan : embedded?.plan) ?? 'free';
+      type U = { plan?: string; clerk_user_id?: string };
+      const embedded = (data as { users?: U | U[] }).users;
+      const user = Array.isArray(embedded) ? embedded[0] : embedded;
+      const livePlan = user?.plan ?? 'free';
       void supabase
         .from('api_keys')
         .update({ last_used_at: new Date().toISOString() })
         .eq('key_hash', keyHash);
-      return { ok: true, userId: data.user_id as string, plan: livePlan };
+      return {
+        ok: true,
+        userId: data.user_id as string,
+        plan: livePlan,
+        // Sprint 9 (compliance): chain attribution — the key's owner and a
+        // 12-char prefix of the key HASH (never the key) as the actor id.
+        clerkUserId: user?.clerk_user_id,
+        keyPrefix: keyHash.slice(0, 12),
+      };
+    },
+    // Sprint 9 (compliance): put the validation on the owner's team chain.
+    // membershipOf resolves the team + role; a key whose owner has no team
+    // records nothing. Errors are swallowed by the caller.
+    async recordEvent(input) {
+      const membership = await membershipOf(supabase, input.clerkUserId);
+      if (!membership) return;
+      await appendAuditEvent(supabase, {
+        teamId: membership.team.id,
+        eventType: input.eventType,
+        actor: input.actor,
+        actorRole: membership.role as AuditActorRole,
+        subject: input.subject,
+        payload: input.payload,
+      });
     },
     async checkUsage(userId, plan) {
       const month = new Date().toISOString().slice(0, 7); // YYYY-MM

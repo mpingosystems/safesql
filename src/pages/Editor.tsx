@@ -25,6 +25,7 @@ import { AuthControls } from '../components/AuthControls';
 import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
 import { useTeam } from '../hooks/useTeam';
 import { createApprovalRequest } from '../services/approvals';
+import { DETECTOR_VERSION } from '../config/detectorVersion';
 
 type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
 
@@ -271,6 +272,8 @@ export function EditorPage() {
         report: next,
         schemaId: activeSchemaId ?? undefined,
         dialect,
+        detectorVersion: DETECTOR_VERSION,
+        tier,
       }).then((ok) => {
         if (ok) void refreshAppUser(); // pull updated count
       });
@@ -293,12 +296,14 @@ export function EditorPage() {
           report: nextReport,
           schemaId: activeSchemaId ?? undefined,
           dialect,
+          detectorVersion: DETECTOR_VERSION,
+          tier,
         }).then((ok) => {
           if (ok) void refreshAppUser();
         });
       }
     },
-    [sql, schema, dialect, source, appUser, overLimit, activeSchemaId, refreshAppUser],
+    [sql, schema, dialect, source, tier, appUser, overLimit, activeSchemaId, refreshAppUser],
   );
 
   // "Fix Issues First" — apply every auto-fixable error in one pass, then
@@ -323,6 +328,8 @@ export function EditorPage() {
         report: nextReport,
         schemaId: activeSchemaId ?? undefined,
         dialect,
+        detectorVersion: DETECTOR_VERSION,
+        tier,
       }).then((ok) => {
         if (ok) void refreshAppUser();
       });
@@ -339,6 +346,8 @@ export function EditorPage() {
         report: next,
         schemaId: activeSchemaId ?? undefined,
         dialect,
+        detectorVersion: DETECTOR_VERSION,
+        tier,
       }).then((ok) => {
         if (ok) void refreshAppUser();
       });

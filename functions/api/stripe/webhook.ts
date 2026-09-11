@@ -270,6 +270,26 @@ async function patchUserBySubscriptionId(
     const text = await res.text();
     throw new Error(`Supabase PATCH user-by-sub ${res.status}: ${text}`);
   }
+  // Sprint 9 (compliance): teams.plan is mirrored by the database trigger
+  // users_sync_owned_team_plan (upgrades only, chain event actor
+  // 'system:stripe'). Nothing to write here — but say what the mirror did,
+  // so a support engineer reading the Functions log can see it happened.
+  if (patch.plan) void logOwnedTeamPlans(subscriptionId, patch.plan, env);
+}
+
+// Observability only. Never throws, never blocks the webhook response.
+async function logOwnedTeamPlans(subscriptionId: string, plan: string, env: Env): Promise<void> {
+  try {
+    const u = await fetch(`${env.SUPABASE_URL}/rest/v1/users?stripe_subscription_id=eq.${enc(subscriptionId)}&select=clerk_user_id`, { headers: supabaseHeaders(env) });
+    const users = (await u.json()) as Array<{ clerk_user_id: string }>;
+    const clerk = users[0]?.clerk_user_id;
+    if (!clerk) return;
+    const t = await fetch(`${env.SUPABASE_URL}/rest/v1/teams?created_by=eq.${enc(clerk)}&select=id,plan`, { headers: supabaseHeaders(env) });
+    const teams = (await t.json()) as Array<{ id: string; plan: string }>;
+    console.log('[webhook] users.plan →', plan, 'owned teams now:', JSON.stringify(teams));
+  } catch (e) {
+    console.warn('[webhook] team plan lookup failed', (e as Error)?.message);
+  }
 }
 
 // Patch that is allowed to fail (e.g. subscription_status column not yet added).

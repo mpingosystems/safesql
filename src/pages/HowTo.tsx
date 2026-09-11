@@ -223,10 +223,10 @@ npx safesql validate models/revenue.sql --json`,
     id: 'compliance',
     label: 'Compliance Team',
     persona: 'compliance / risk',
-    // Deliberately scoped to what is shipped AND externally verifiable: the CI
-    // pipeline and its logs. The audit log, approval workflow and CSV export
-    // exist in code but depend on migrations still pending manual application,
-    // so nothing here claims them.
+    // Scoped to what is shipped AND externally verifiable. Sprint 9 added the
+    // hash-chained audit trail, approval separation of duties, the auditor role
+    // and signed evidence bundles — each step below points at the surface that
+    // proves it (CI log, /team, /team/approvals).
     problem:
       'You need to demonstrate that every SQL change was checked before it reached production — and "we review carefully" is not evidence.',
     steps: [
@@ -291,9 +291,14 @@ jobs:
         body:
           'Every run records the commit SHA, the files checked, the detectors that fired and the outcome, retained under your GitHub retention policy. It is produced by the pipeline rather than asserted by the team, which is what makes it usable as evidence.',
       },
+      {
+        title: 'Keep the hosted trail, and export it signed (Business)',
+        body:
+          'Every API and editor validation, approval decision, rule change and membership change is appended to a per-team SHA-256 hash chain that the database refuses to update or delete. Approvals enforce separation of duties: the requester can never resolve their own request. Give your compliance officer a read-only auditor seat, then generate a signed evidence bundle for the reporting period from /team — it ships with a standalone verifier that re-hashes every event offline.',
+      },
     ],
     outcome:
-      'The CI pipeline is your audit trail. Every SQL change validated before merge. Every PR with a finding blocked until resolved. The GitHub Action log proves what was checked and when.',
+      'The CI pipeline is your first audit trail. On Business, the hosted chain is the second: tamper-evident, role-controlled, exportable as a signed bundle an auditor can verify without trusting you — or us.',
   },
   {
     id: 'engineering-lead',

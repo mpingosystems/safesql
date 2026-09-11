@@ -120,7 +120,7 @@ export function SecurityPage() {
         <P>SafeSQL Pro's security controls are designed to align with SOC 2 Type 1 Trust Service Criteria:</P>
         <UL
           items={[
-            'Security: encryption, access controls, audit logging',
+            'Security: encryption, role-based access controls (owner / manager / member / read-only auditor), hash-chained audit logging',
             'Availability: Cloudflare global infrastructure',
             'Confidentiality: schema credentials never stored in plaintext',
             'Processing integrity: deterministic rule engine, no AI hallucinations in detection decisions',
@@ -128,9 +128,10 @@ export function SecurityPage() {
           ]}
         />
         <P>
-          We are working toward a formal SOC 2 Type 1 audit. Our audit log is available to Business and
-          Enterprise tier customers at{' '}
-          <a href="#/team/audit" style={{ color: '#a78bfa' }}>safesqlpro.dev/team/audit</a>.
+          We are working toward a formal SOC 2 Type 1 audit. Business and Enterprise teams have a tamper-evident,
+          hash-chained audit trail and HMAC-signed evidence bundles at{' '}
+          <a href="#/team" style={{ color: '#a78bfa' }}>safesqlpro.dev/team</a>; every bundle includes an offline
+          verifier so the evidence can be checked without trusting SafeSQL Pro.
         </P>
         <P>Contact: security@safesqlpro.dev</P>
       </LegalSection>

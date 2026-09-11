@@ -372,7 +372,7 @@ const TIERS = [
   {
     icon: '⛊',
     kicker: 'Audit-ready (Business)',
-    body: 'Demonstrate what was checked, what failed, how it was resolved, and who approved it. Compliance exports. Approval workflows. Role-based team access.',
+    body: 'Prove what was checked, what failed, how it was resolved, and who approved it — on a hash-chained audit trail you can verify offline. Signed evidence bundles per reporting period. Approval policies with separation of duties. Read-only auditor seats.',
     example: 'Proved: every financial query validated before the audit period',
   },
 ];
@@ -423,7 +423,8 @@ const COMPARE_ROWS: Array<[string, string, string, string, string]> = [
   ['dbt integration', '✓', '✓', '✓', '✓'],
   ['CI enforcement', '✓', '✓', '✓', '✓'],
   ['Synthetic proof of row inflation', '✗', '✗', '✗', '✓'],
-  ['Hosted audit evidence trail', '✗', 'Self-hosted recipe', 'Partial', '✓ (Team+)'],
+  ['Hosted audit evidence trail', '✗', 'Self-hosted recipe', 'Partial', '✓ (signed bundles on Business)'],
+  ['Tamper-evident (hash-chained) audit log', '✗', '✗', '✗', '✓'],
   ['Price', 'Free / open source', 'Free / open source', '$750–$2,000+/mo', '$0–$599/mo'],
 ];
 
@@ -582,7 +583,7 @@ export function PricingSection() {
           tier="Team"
           price={monthly ? '$199' : '$1,910'}
           period={monthly ? 'per month · 5 seats' : 'per year · 5 seats'}
-          features={['Everything in Pro', '5 seats', 'Team analytics', 'Approval workflow', 'Shared query library', 'GitHub Action']}
+          features={['Everything in Pro', '5 seats', 'Team analytics', 'Approval workflow (separation of duties)', 'Shared query library', 'GitHub Action']}
           cta={busyPlan === 'team' || !isClerkReady ? 'Loading…' : 'Start team trial'}
           onUpgrade={() => void handleUpgrade('team')}
           disabled={busyPlan !== null || !isClerkReady}
@@ -592,7 +593,7 @@ export function PricingSection() {
           tier="Business"
           price={monthly ? '$599' : '$5,750'}
           period={monthly ? 'per month · 20 seats' : 'per year · 20 seats'}
-          features={['Everything in Team', '20 seats', 'Audit log', 'Custom rules', 'CSV export', 'Slack alerts', 'SOC 2 alignment']}
+          features={['Everything in Team', '20 seats', 'Tamper-evident audit chain', 'Custom rules enforced in CI + API', 'CSV + signed evidence bundles', 'Slack alerts (manual send)', 'SOC 2 alignment']}
           cta={busyPlan === 'business' || !isClerkReady ? 'Loading…' : 'Start with Business'}
           onUpgrade={() => void handleUpgrade('business')}
           disabled={busyPlan !== null || !isClerkReady}

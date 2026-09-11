@@ -1,6 +1,6 @@
 {
   "name": "safesql",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Pre-execution semantic SQL validation — CLI",
   "type": "module",
   "bin": { "safesql": "./dist/index.js" },

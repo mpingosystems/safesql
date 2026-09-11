@@ -24,7 +24,7 @@ import { applyFix, canApplyFix } from '../services/applyFix';
 import { AuthControls } from '../components/AuthControls';
 import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
 import { useTeam } from '../hooks/useTeam';
-import { createApprovalRequest } from '../services/approvals';
+import { requestApproval } from '../services/approvalsApi';
 import { DETECTOR_VERSION } from '../config/detectorVersion';
 
 type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
@@ -229,23 +229,34 @@ export function EditorPage() {
   const [approvalNote, setApprovalNote] = useState('');
   const [approvalMsg, setApprovalMsg] = useState<string | null>(null);
 
+  // Sprint 9 (compliance): the server re-validates the SQL, evaluates the
+  // team's approval policies and writes the chain event. The browser only asks.
   const submitApproval = useCallback(async () => {
     if (!appUser?.id || !report) return;
-    const res = await createApprovalRequest({
-      teamId: team?.id ?? appUser.id,
-      requesterId: appUser.email || appUser.id,
-      sql,
-      ddl,
-      dialect,
-      report,
-      note: approvalNote.trim() || undefined,
-    });
-    setApprovalMsg(res ? '✓ Approval request sent to your team.' : 'Could not send request (is the migration applied?).');
-    if (res) {
-      setApprovalNote('');
-      setTimeout(() => { setApprovalOpen(false); setApprovalMsg(null); }, 1200);
+    const res = await requestApproval({ sql, ddl, dialect, report, note: approvalNote.trim() || undefined });
+    if (!res.ok) {
+      setApprovalMsg(
+        res.status === 409
+          ? 'The query changed since it was validated — re-validate and try again.'
+          : res.status === 403
+            ? 'Auditors are read-only and cannot request approval.'
+            : `Could not send request: ${res.error}`,
+      );
+      return;
     }
-  }, [appUser, report, team?.id, sql, ddl, dialect, approvalNote]);
+    if (!res.required) {
+      setApprovalMsg("No approval needed — this query passes your team's policies.");
+      setTimeout(() => { setApprovalOpen(false); setApprovalMsg(null); }, 1600);
+      return;
+    }
+    setApprovalMsg(
+      res.duplicate
+        ? '✓ A request for this exact query is already pending with your team.'
+        : `✓ Approval request sent (${res.trigger_reasons.join(', ')}) — an ${res.approver_roles.join(' or ')} will review it.`,
+    );
+    setApprovalNote('');
+    setTimeout(() => { setApprovalOpen(false); setApprovalMsg(null); }, 1600);
+  }, [appUser, report, sql, ddl, dialect, approvalNote]);
 
   const runValidation = useCallback(async () => {
     if (overLimit) return; // hard block when free-tier limit reached

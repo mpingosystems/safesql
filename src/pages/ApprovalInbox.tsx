@@ -1,22 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
-import { useTeam } from '../hooks/useTeam';
-import { getSupabase, isSupabaseConfigured } from '../services/supabaseClient';
-import {
-  approveRequest,
-  getPendingRequests,
-  getResolvedRequests,
-  rejectRequest,
-  type ApprovalRow,
-} from '../services/approvals';
+import { listApprovals, resolveApproval, type ApprovalInboxRow as ApprovalRow } from '../services/approvalsApi';
 import { ValidationReport } from '../components/ValidationReport';
 
 // Sprint 8 Part 3 / Sprint 10 depth — manager approval inbox at /team/approvals.
 // Pending + History tabs, expandable full report, and a confirm dialog before
-// approving/rejecting. Queries by the real team id (teams.id).
+// approving/rejecting.
+//
+// Sprint 9 (compliance): reads and resolves through /api/teams/approvals. The
+// server decides who may resolve each request (policy roles + separation of
+// duties) and returns it per row as `can_resolve_this`; the Approve / Reject
+// buttons render only when it is true. Every decision lands on the team's
+// tamper-evident chain with the approver's identity and role.
 export function ApprovalInboxPage() {
   const { appUser } = useAppUser();
-  const { team } = useTeam();
   const isTeam = !!appUser && ['team', 'business', 'enterprise'].includes(appUser.plan);
 
   const [tab, setTab] = useState<'pending' | 'history'>('pending');
@@ -25,30 +22,35 @@ export function ApprovalInboxPage() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [confirm, setConfirm] = useState<{ id: string; approve: boolean } | null>(null);
-
-  const teamId = team?.id ?? appUser?.id ?? '';
+  const [myRole, setMyRole] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!isTeam || !isSupabaseConfigured || !teamId) return;
-    const supabase = getSupabase();
-    if (!supabase) return;
-    setPending(await getPendingRequests(teamId, supabase));
-    setHistory(await getResolvedRequests(teamId, supabase));
-  }, [isTeam, teamId]);
+    if (!isTeam) return;
+    const [p, h] = await Promise.all([listApprovals('pending'), listApprovals('all', {}, { limit: 100 })]);
+    if ('error' in p) { setError(p.error); return; }
+    setError(null);
+    setMyRole(p.my_role);
+    setPending(p.rows);
+    setHistory('error' in h ? [] : h.rows.filter((r) => r.status !== 'pending'));
+  }, [isTeam]);
 
   useEffect(() => {
-    void refresh();
+    // Fetch on mount / when eligibility changes. Scheduled as a microtask so
+    // the state updates happen in a callback, not synchronously in the effect.
+    void Promise.resolve().then(refresh);
   }, [refresh]);
 
   const doConfirm = async () => {
     if (!confirm) return;
-    const supabase = getSupabase();
-    if (!supabase) return;
     const note = notes[confirm.id];
-    if (confirm.approve) await approveRequest(confirm.id, note, supabase);
-    else await rejectRequest(confirm.id, note, supabase);
+    const res = await resolveApproval(confirm.id, confirm.approve ? 'approved' : 'rejected', note);
     setConfirm(null);
-    setNotes((n) => ({ ...n, [confirm.id]: '' }));
+    if (!res.ok) {
+      setError(res.error);
+    } else {
+      setNotes((n) => ({ ...n, [confirm.id]: '' }));
+    }
     await refresh();
   };
 
@@ -64,10 +66,12 @@ export function ApprovalInboxPage() {
           </p>
         ) : (
           <>
-            <div style={{ display: 'flex', gap: 8, margin: '12px 0 16px' }}>
+            <div style={{ display: 'flex', gap: 8, margin: '12px 0 16px', alignItems: 'center' }}>
               <Tab active={tab === 'pending'} onClick={() => setTab('pending')}>Pending ({pending.length})</Tab>
               <Tab active={tab === 'history'} onClick={() => setTab('history')}>History ({history.length})</Tab>
+              {myRole && <span style={{ color: '#71717a', fontSize: 12, marginLeft: 'auto' }}>You are {myRole}{myRole === 'auditor' ? ' (read-only)' : ''}</span>}
             </div>
+            {error && <p style={{ color: '#f87171', fontSize: 13 }}>{error}</p>}
 
             {tab === 'pending' ? (
               pending.length === 0 ? (
@@ -78,12 +82,15 @@ export function ApprovalInboxPage() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                       <div>
                         <ScoreBadge score={r.risk_score} />
-                        <span style={{ color: '#a1a1aa', fontSize: 12, marginLeft: 10 }}>from {r.requester_id}</span>
+                        <span style={{ color: '#a1a1aa', fontSize: 12, marginLeft: 10 }}>from {r.requester_email ?? r.requester_clerk_user_id ?? 'unknown'}</span>
                       </div>
                       <span style={{ color: '#71717a', fontSize: 12 }}>{fmt(r.created_at)}</span>
                     </div>
                     <div style={{ fontSize: 12, color: '#a1a1aa', marginTop: 6 }}>
                       Top issue: <code style={{ color: '#a78bfa' }}>{topIssue(r)}</code>
+                      {r.trigger_reasons.length > 0 && (
+                        <> · Requires approval: <code style={{ color: '#fbbf24' }}>{r.trigger_reasons.join(', ')}</code></>
+                      )}
                     </div>
                     <pre style={preStyle}>{r.sql}</pre>
                     {r.requester_note && <div style={{ fontSize: 12, color: '#a1a1aa', fontStyle: 'italic' }}>Note: {r.requester_note}</div>}
@@ -97,16 +104,26 @@ export function ApprovalInboxPage() {
                       </div>
                     )}
 
-                    <textarea
-                      placeholder="Optional note to include with your decision…"
-                      value={notes[r.id] ?? ''}
-                      onChange={(e) => setNotes((n) => ({ ...n, [r.id]: e.target.value }))}
-                      style={noteStyle}
-                    />
-                    <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                      <button type="button" onClick={() => setConfirm({ id: r.id, approve: true })} style={approveBtn}>Approve</button>
-                      <button type="button" onClick={() => setConfirm({ id: r.id, approve: false })} style={rejectBtn}>Reject</button>
-                    </div>
+                    {r.can_resolve_this ? (
+                      <>
+                        <textarea
+                          placeholder="Optional note to include with your decision…"
+                          value={notes[r.id] ?? ''}
+                          onChange={(e) => setNotes((n) => ({ ...n, [r.id]: e.target.value }))}
+                          style={noteStyle}
+                        />
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                          <button type="button" onClick={() => setConfirm({ id: r.id, approve: true })} style={approveBtn}>Approve</button>
+                          <button type="button" onClick={() => setConfirm({ id: r.id, approve: false })} style={rejectBtn}>Reject</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 12, color: '#71717a', marginTop: 8 }}>
+                        {r.requester_clerk_user_id === appUser?.clerkUserId
+                          ? 'Your own request — an ' + r.approver_roles.join(' or ') + ' must resolve it (separation of duties).'
+                          : 'Awaiting an ' + r.approver_roles.join(' or ') + '.'}
+                      </div>
+                    )}
                   </div>
                 ))
               )
@@ -118,13 +135,15 @@ export function ApprovalInboxPage() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                     <div>
                       <StatusBadge status={r.status} />
-                      <span style={{ color: '#a1a1aa', fontSize: 12, marginLeft: 10 }}>from {r.requester_id}</span>
+                      <span style={{ color: '#a1a1aa', fontSize: 12, marginLeft: 10 }}>from {r.requester_email ?? r.requester_clerk_user_id ?? 'unknown'}</span>
                     </div>
                     <span style={{ color: '#71717a', fontSize: 12 }}>{fmt(r.resolved_at)}</span>
                   </div>
                   <pre style={preStyle}>{r.sql}</pre>
                   <div style={{ fontSize: 12, color: '#71717a' }}>
-                    {r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.approver_id ?? 'a manager'}
+                    {r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.approver_email ?? r.approver_clerk_user_id ?? 'unknown'}
+                    {r.approver_role ? ` (${r.approver_role})` : ''}
+                    {r.resolution_event_seq ? ` · chain #${r.resolution_event_seq}` : ''}
                   </div>
                   {r.approver_note && <div style={{ fontSize: 12, color: '#a1a1aa', fontStyle: 'italic', marginTop: 4 }}>Note: {r.approver_note}</div>}
                 </div>

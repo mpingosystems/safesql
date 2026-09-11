@@ -48,5 +48,5 @@ outputs:
   files_checked:
     description: "Number of SQL files checked"
 runs:
-  using: "node20"
+  using: "node24"
   main: "action/dist/index.js"

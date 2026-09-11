@@ -97,3 +97,61 @@ export async function chainHead(
   if (!data) return null;
   return { seq: Number(data.seq), hash: String(data.hash), created_at_iso: String(data.created_at_iso) };
 }
+
+// ── Sprint 9 item 5: bundles ─────────────────────────────────────────────────
+
+/** Roles that may GENERATE a bundle (members may read/download only). */
+export const BUNDLE_WRITER_ROLES: ReadonlySet<string> = new Set(['owner', 'manager', 'auditor']);
+
+export interface SigningKey {
+  version: number;
+  key_hex: string;
+  active: boolean;
+}
+
+/** The team's active signing key, or a specific version. Service role only. */
+export async function signingKeyFor(db: SupabaseClient, teamId: string, version?: number): Promise<SigningKey | null> {
+  let q = db.from('team_signing_keys').select('version, key_hex, active').eq('team_id', teamId);
+  q = version === undefined ? q.eq('active', true) : q.eq('version', version);
+  const { data } = await q.maybeSingle();
+  if (!data) return null;
+  return { version: Number(data.version), key_hex: String(data.key_hex), active: data.active === true };
+}
+
+/** All chain rows in [fromSeq, toSeq], fetched in 1,000-row pages, wire shape. */
+export async function fetchChainSegment(db: SupabaseClient, teamId: string, fromSeq: number, toSeq: number): Promise<AuditEventRow[]> {
+  const rows: AuditEventRow[] = [];
+  for (let lower = fromSeq; lower <= toSeq; lower += 1000) {
+    const upper = Math.min(lower + 999, toSeq);
+    const { data, error } = await db
+      .from('audit_events')
+      .select('*')
+      .eq('team_id', teamId)
+      .gte('seq', lower)
+      .lte('seq', upper)
+      .order('seq', { ascending: true });
+    if (error) throw new Error(`Could not read chain: ${error.message}`);
+    const page = ((data ?? []) as Record<string, unknown>[]).map(toWireRow);
+    rows.push(...page);
+    if (page.length === 0) break;
+  }
+  return rows;
+}
+
+/** First and last seq whose created_at falls in [from, to]; null when the period is empty. */
+export async function seqRangeForPeriod(
+  db: SupabaseClient,
+  teamId: string,
+  from: string,
+  to: string,
+): Promise<{ fromSeq: number; toSeq: number } | null> {
+  const first = await db.from('audit_events').select('seq').eq('team_id', teamId).gte('created_at', from).lte('created_at', to).order('seq', { ascending: true }).limit(1).maybeSingle();
+  const last = await db.from('audit_events').select('seq').eq('team_id', teamId).gte('created_at', from).lte('created_at', to).order('seq', { ascending: false }).limit(1).maybeSingle();
+  if (!first.data || !last.data) return null;
+  return { fromSeq: Number(first.data.seq), toSeq: Number(last.data.seq) };
+}
+
+export async function memberEmail(db: SupabaseClient, teamId: string, clerkUserId: string): Promise<string | null> {
+  const { data } = await db.from('team_members').select('email').eq('team_id', teamId).eq('clerk_user_id', clerkUserId).maybeSingle();
+  return (data?.email as string | undefined) ?? null;
+}

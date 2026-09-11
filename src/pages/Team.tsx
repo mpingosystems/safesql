@@ -13,6 +13,7 @@ import {
   type IssueRow,
 } from '../components/team/IssueBreakdown';
 import { HealthTrendChartSkeleton, type DailyScore } from '../components/team/healthChartTypes';
+import { EvidenceBundles } from '../components/team/EvidenceBundles';
 import {
   AuditTrailFilters,
   AuditTrailTable,
@@ -692,6 +693,11 @@ export function TeamPage() {
             {audit.truncated && ' (scan limit reached — counts are a lower bound)'}.
           </p>
         )}
+      </Section>
+
+      {/* 6. EVIDENCE BUNDLES — Sprint 9 (compliance). Business+; locked state otherwise. */}
+      <Section title="Evidence Bundles">
+        <EvidenceBundles teamPlan={team.plan} />
       </Section>
 
       <ValidationDetailModal row={detail.row} onClose={detail.close} />

@@ -1,0 +1,723 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/manifest/v12.json",
+    "dbt_version": "1.8.4",
+    "generated_at": "2026-09-10T14:02:11.000000Z",
+    "invocation_id": "9a0c2e7e-0000-4000-8000-000000000001",
+    "project_name": "shop",
+    "adapter_type": "postgres"
+  },
+  "nodes": {
+    "model.shop.stg_orders": {
+      "database": "shop",
+      "schema": "analytics",
+      "name": "stg_orders",
+      "resource_type": "model",
+      "package_name": "shop",
+      "path": "stg_orders.sql",
+      "original_file_path": "models/stg_orders.sql",
+      "unique_id": "model.shop.stg_orders",
+      "fqn": [
+        "shop",
+        "stg_orders"
+      ],
+      "alias": "stg_orders",
+      "checksum": {
+        "name": "sha256",
+        "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "config": {
+        "enabled": true,
+        "materialized": "view",
+        "tags": [],
+        "meta": {}
+      },
+      "tags": [],
+      "description": "",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "description": "Primary key",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "description": "FK to dim_customers",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "amount": {
+          "name": "amount",
+          "description": "",
+          "data_type": "numeric",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "ordered_at": {
+          "name": "ordered_at",
+          "description": "",
+          "data_type": "timestamp",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        }
+      },
+      "meta": {},
+      "depends_on": {
+        "macros": [],
+        "nodes": [
+          "source.shop.raw.orders"
+        ]
+      },
+      "language": "sql"
+    },
+    "model.shop.dim_customers": {
+      "database": "shop",
+      "schema": "analytics",
+      "name": "dim_customers",
+      "resource_type": "model",
+      "package_name": "shop",
+      "path": "dim_customers.sql",
+      "original_file_path": "models/dim_customers.sql",
+      "unique_id": "model.shop.dim_customers",
+      "fqn": [
+        "shop",
+        "dim_customers"
+      ],
+      "alias": "dim_customers",
+      "checksum": {
+        "name": "sha256",
+        "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "config": {
+        "enabled": true,
+        "materialized": "table",
+        "tags": [],
+        "meta": {}
+      },
+      "tags": [],
+      "description": "",
+      "columns": {
+        "customer_id": {
+          "name": "customer_id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "email": {
+          "name": "email",
+          "description": "",
+          "data_type": "text",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "region": {
+          "name": "region",
+          "description": "",
+          "data_type": "text",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        }
+      },
+      "meta": {},
+      "depends_on": {
+        "macros": [],
+        "nodes": [
+          "source.shop.raw.customers"
+        ]
+      },
+      "language": "sql"
+    },
+    "model.shop.int_orders_enriched": {
+      "database": "shop",
+      "schema": "analytics",
+      "name": "int_orders_enriched",
+      "resource_type": "model",
+      "package_name": "shop",
+      "path": "int_orders_enriched.sql",
+      "original_file_path": "models/int_orders_enriched.sql",
+      "unique_id": "model.shop.int_orders_enriched",
+      "fqn": [
+        "shop",
+        "int_orders_enriched"
+      ],
+      "alias": "int_orders_enriched",
+      "checksum": {
+        "name": "sha256",
+        "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "config": {
+        "enabled": true,
+        "materialized": "ephemeral",
+        "tags": [],
+        "meta": {}
+      },
+      "tags": [],
+      "description": "",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "region": {
+          "name": "region",
+          "description": "",
+          "data_type": "text",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "amount": {
+          "name": "amount",
+          "description": "",
+          "data_type": "numeric",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        }
+      },
+      "meta": {},
+      "depends_on": {
+        "macros": [],
+        "nodes": [
+          "model.shop.stg_orders",
+          "model.shop.dim_customers"
+        ]
+      },
+      "language": "sql"
+    },
+    "model.shop.fct_revenue": {
+      "database": "shop",
+      "schema": "analytics",
+      "name": "fct_revenue",
+      "resource_type": "model",
+      "package_name": "shop",
+      "path": "fct_revenue.sql",
+      "original_file_path": "models/fct_revenue.sql",
+      "unique_id": "model.shop.fct_revenue",
+      "fqn": [
+        "shop",
+        "fct_revenue"
+      ],
+      "alias": "fct_revenue",
+      "checksum": {
+        "name": "sha256",
+        "checksum": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "config": {
+        "enabled": true,
+        "materialized": "table",
+        "tags": [
+          "finance"
+        ],
+        "meta": {
+          "owner": "finance-eng"
+        }
+      },
+      "tags": [
+        "finance"
+      ],
+      "description": "",
+      "columns": {
+        "order_id": {
+          "name": "order_id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "revenue": {
+          "name": "revenue",
+          "description": "Documented as generic `number`; catalog says numeric(12,2)",
+          "data_type": "number",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "order_date": {
+          "name": "order_date",
+          "description": "",
+          "data_type": "date",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        }
+      },
+      "meta": {
+        "owner": "finance-eng"
+      },
+      "depends_on": {
+        "macros": [],
+        "nodes": [
+          "model.shop.int_orders_enriched"
+        ]
+      },
+      "language": "sql"
+    },
+    "test.shop.unique_stg_orders_order_id": {
+      "unique_id": "test.shop.unique_stg_orders_order_id",
+      "resource_type": "test",
+      "name": "unique_stg_orders_order_id",
+      "package_name": "shop",
+      "path": "unique_stg_orders_order_id.sql",
+      "original_file_path": "models/schema.yml",
+      "fqn": [
+        "shop",
+        "unique_stg_orders_order_id"
+      ],
+      "alias": "unique_stg_orders_order_id",
+      "config": {
+        "enabled": true,
+        "materialized": "test",
+        "severity": "ERROR"
+      },
+      "tags": [],
+      "columns": {},
+      "meta": {},
+      "depends_on": {
+        "macros": [
+          "macro.dbt.test_unique"
+        ],
+        "nodes": [
+          "model.shop.stg_orders"
+        ]
+      },
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "order_id",
+          "model": "{{ get_where_subquery(ref('stg_orders')) }}"
+        },
+        "namespace": null
+      },
+      "column_name": "order_id",
+      "attached_node": "model.shop.stg_orders"
+    },
+    "test.shop.not_null_stg_orders_order_id": {
+      "unique_id": "test.shop.not_null_stg_orders_order_id",
+      "resource_type": "test",
+      "name": "not_null_stg_orders_order_id",
+      "package_name": "shop",
+      "path": "not_null_stg_orders_order_id.sql",
+      "original_file_path": "models/schema.yml",
+      "fqn": [
+        "shop",
+        "not_null_stg_orders_order_id"
+      ],
+      "alias": "not_null_stg_orders_order_id",
+      "config": {
+        "enabled": true,
+        "materialized": "test",
+        "severity": "ERROR"
+      },
+      "tags": [],
+      "columns": {},
+      "meta": {},
+      "depends_on": {
+        "macros": [
+          "macro.dbt.test_not_null"
+        ],
+        "nodes": [
+          "model.shop.stg_orders"
+        ]
+      },
+      "test_metadata": {
+        "name": "not_null",
+        "kwargs": {
+          "column_name": "order_id",
+          "model": "{{ get_where_subquery(ref('stg_orders')) }}"
+        },
+        "namespace": null
+      },
+      "column_name": "order_id",
+      "attached_node": "model.shop.stg_orders"
+    },
+    "test.shop.relationships_stg_orders_customer_id_dim_customers": {
+      "unique_id": "test.shop.relationships_stg_orders_customer_id_dim_customers",
+      "resource_type": "test",
+      "name": "relationships_stg_orders_customer_id_dim_customers",
+      "package_name": "shop",
+      "path": "relationships_stg_orders_customer_id_dim_customers.sql",
+      "original_file_path": "models/schema.yml",
+      "fqn": [
+        "shop",
+        "relationships_stg_orders_customer_id_dim_customers"
+      ],
+      "alias": "relationships_stg_orders_customer_id_dim_customers",
+      "config": {
+        "enabled": true,
+        "materialized": "test",
+        "severity": "ERROR"
+      },
+      "tags": [],
+      "columns": {},
+      "meta": {},
+      "depends_on": {
+        "macros": [
+          "macro.dbt.test_relationships"
+        ],
+        "nodes": [
+          "model.shop.stg_orders",
+          "model.shop.dim_customers"
+        ]
+      },
+      "test_metadata": {
+        "name": "relationships",
+        "kwargs": {
+          "column_name": "customer_id",
+          "model": "{{ get_where_subquery(ref('stg_orders')) }}",
+          "to": "ref('dim_customers')",
+          "field": "customer_id"
+        },
+        "namespace": null
+      },
+      "column_name": "customer_id",
+      "attached_node": "model.shop.stg_orders"
+    },
+    "test.shop.unique_dim_customers_customer_id": {
+      "unique_id": "test.shop.unique_dim_customers_customer_id",
+      "resource_type": "test",
+      "name": "unique_dim_customers_customer_id",
+      "package_name": "shop",
+      "path": "unique_dim_customers_customer_id.sql",
+      "original_file_path": "models/schema.yml",
+      "fqn": [
+        "shop",
+        "unique_dim_customers_customer_id"
+      ],
+      "alias": "unique_dim_customers_customer_id",
+      "config": {
+        "enabled": true,
+        "materialized": "test",
+        "severity": "ERROR"
+      },
+      "tags": [],
+      "columns": {},
+      "meta": {},
+      "depends_on": {
+        "macros": [
+          "macro.dbt.test_unique"
+        ],
+        "nodes": [
+          "model.shop.dim_customers"
+        ]
+      },
+      "test_metadata": {
+        "name": "unique",
+        "kwargs": {
+          "column_name": "customer_id",
+          "model": "{{ get_where_subquery(ref('dim_customers')) }}"
+        },
+        "namespace": null
+      },
+      "column_name": "customer_id",
+      "attached_node": "model.shop.dim_customers"
+    },
+    "test.shop.not_null_dim_customers_customer_id": {
+      "unique_id": "test.shop.not_null_dim_customers_customer_id",
+      "resource_type": "test",
+      "name": "not_null_dim_customers_customer_id",
+      "package_name": "shop",
+      "path": "not_null_dim_customers_customer_id.sql",
+      "original_file_path": "models/schema.yml",
+      "fqn": [
+        "shop",
+        "not_null_dim_customers_customer_id"
+      ],
+      "alias": "not_null_dim_customers_customer_id",
+      "config": {
+        "enabled": true,
+        "materialized": "test",
+        "severity": "ERROR"
+      },
+      "tags": [],
+      "columns": {},
+      "meta": {},
+      "depends_on": {
+        "macros": [
+          "macro.dbt.test_not_null"
+        ],
+        "nodes": [
+          "model.shop.dim_customers"
+        ]
+      },
+      "test_metadata": {
+        "name": "not_null",
+        "kwargs": {
+          "column_name": "customer_id",
+          "model": "{{ get_where_subquery(ref('dim_customers')) }}"
+        },
+        "namespace": null
+      },
+      "column_name": "customer_id",
+      "attached_node": "model.shop.dim_customers"
+    },
+    "test.shop.not_null_fct_revenue_revenue": {
+      "unique_id": "test.shop.not_null_fct_revenue_revenue",
+      "resource_type": "test",
+      "name": "not_null_fct_revenue_revenue",
+      "package_name": "shop",
+      "path": "not_null_fct_revenue_revenue.sql",
+      "original_file_path": "models/schema.yml",
+      "fqn": [
+        "shop",
+        "not_null_fct_revenue_revenue"
+      ],
+      "alias": "not_null_fct_revenue_revenue",
+      "config": {
+        "enabled": true,
+        "materialized": "test",
+        "severity": "ERROR"
+      },
+      "tags": [],
+      "columns": {},
+      "meta": {},
+      "depends_on": {
+        "macros": [
+          "macro.dbt.test_not_null"
+        ],
+        "nodes": [
+          "model.shop.fct_revenue"
+        ]
+      },
+      "test_metadata": {
+        "name": "not_null",
+        "kwargs": {
+          "column_name": "revenue",
+          "model": "{{ get_where_subquery(ref('fct_revenue')) }}"
+        },
+        "namespace": null
+      },
+      "column_name": "revenue",
+      "attached_node": "model.shop.fct_revenue"
+    }
+  },
+  "sources": {
+    "source.shop.raw.orders": {
+      "database": "shop",
+      "schema": "raw",
+      "name": "orders",
+      "resource_type": "source",
+      "package_name": "shop",
+      "path": "models/sources.yml",
+      "original_file_path": "models/sources.yml",
+      "unique_id": "source.shop.raw.orders",
+      "fqn": [
+        "shop",
+        "raw",
+        "orders"
+      ],
+      "source_name": "raw",
+      "source_description": "Raw application tables",
+      "loader": "fivetran",
+      "identifier": "orders",
+      "quoting": {},
+      "loaded_at_field": "_loaded_at",
+      "freshness": null,
+      "description": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "amount": {
+          "name": "amount",
+          "description": "",
+          "data_type": "numeric",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "created_at": {
+          "name": "created_at",
+          "description": "",
+          "data_type": "timestamp",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        }
+      },
+      "meta": {},
+      "tags": [],
+      "config": {
+        "enabled": true
+      }
+    },
+    "source.shop.raw.customers": {
+      "database": "shop",
+      "schema": "raw",
+      "name": "customers",
+      "resource_type": "source",
+      "package_name": "shop",
+      "path": "models/sources.yml",
+      "original_file_path": "models/sources.yml",
+      "unique_id": "source.shop.raw.customers",
+      "fqn": [
+        "shop",
+        "raw",
+        "customers"
+      ],
+      "source_name": "raw",
+      "source_description": "Raw application tables",
+      "loader": "fivetran",
+      "identifier": "customers",
+      "quoting": {},
+      "loaded_at_field": "_loaded_at",
+      "freshness": null,
+      "description": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "description": "",
+          "data_type": "integer",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "email": {
+          "name": "email",
+          "description": "",
+          "data_type": "text",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        },
+        "region": {
+          "name": "region",
+          "description": "",
+          "data_type": "text",
+          "meta": {},
+          "constraints": [],
+          "tags": []
+        }
+      },
+      "meta": {},
+      "tags": [],
+      "config": {
+        "enabled": true
+      }
+    }
+  },
+  "macros": {},
+  "docs": {},
+  "exposures": {},
+  "metrics": {},
+  "groups": {},
+  "selectors": {},
+  "disabled": {},
+  "parent_map": {
+    "model.shop.stg_orders": [
+      "source.shop.raw.orders"
+    ],
+    "model.shop.dim_customers": [
+      "source.shop.raw.customers"
+    ],
+    "model.shop.int_orders_enriched": [
+      "model.shop.stg_orders",
+      "model.shop.dim_customers"
+    ],
+    "model.shop.fct_revenue": [
+      "model.shop.int_orders_enriched"
+    ],
+    "test.shop.unique_stg_orders_order_id": [
+      "model.shop.stg_orders"
+    ],
+    "test.shop.not_null_stg_orders_order_id": [
+      "model.shop.stg_orders"
+    ],
+    "test.shop.relationships_stg_orders_customer_id_dim_customers": [
+      "model.shop.stg_orders",
+      "model.shop.dim_customers"
+    ],
+    "test.shop.unique_dim_customers_customer_id": [
+      "model.shop.dim_customers"
+    ],
+    "test.shop.not_null_dim_customers_customer_id": [
+      "model.shop.dim_customers"
+    ],
+    "test.shop.not_null_fct_revenue_revenue": [
+      "model.shop.fct_revenue"
+    ],
+    "source.shop.raw.orders": [],
+    "source.shop.raw.customers": []
+  },
+  "child_map": {
+    "model.shop.stg_orders": [
+      "model.shop.int_orders_enriched",
+      "test.shop.unique_stg_orders_order_id",
+      "test.shop.not_null_stg_orders_order_id",
+      "test.shop.relationships_stg_orders_customer_id_dim_customers"
+    ],
+    "model.shop.dim_customers": [
+      "model.shop.int_orders_enriched",
+      "test.shop.relationships_stg_orders_customer_id_dim_customers",
+      "test.shop.unique_dim_customers_customer_id",
+      "test.shop.not_null_dim_customers_customer_id"
+    ],
+    "model.shop.int_orders_enriched": [
+      "model.shop.fct_revenue"
+    ],
+    "model.shop.fct_revenue": [
+      "test.shop.not_null_fct_revenue_revenue"
+    ],
+    "test.shop.unique_stg_orders_order_id": [],
+    "test.shop.not_null_stg_orders_order_id": [],
+    "test.shop.relationships_stg_orders_customer_id_dim_customers": [],
+    "test.shop.unique_dim_customers_customer_id": [],
+    "test.shop.not_null_dim_customers_customer_id": [],
+    "test.shop.not_null_fct_revenue_revenue": [],
+    "source.shop.raw.orders": [
+      "model.shop.stg_orders"
+    ],
+    "source.shop.raw.customers": [
+      "model.shop.dim_customers"
+    ]
+  },
+  "group_map": {},
+  "saved_queries": {},
+  "semantic_models": {},
+  "unit_tests": {}
+}

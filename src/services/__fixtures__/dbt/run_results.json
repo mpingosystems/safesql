@@ -1,0 +1,53 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/run-results/v6.json",
+    "dbt_version": "1.8.4",
+    "generated_at": "2026-09-10T14:03:58.000000Z"
+  },
+  "results": [
+    {
+      "status": "success",
+      "timing": [],
+      "thread_id": "Thread-1",
+      "execution_time": 0.42,
+      "adapter_response": {},
+      "message": "CREATE VIEW",
+      "failures": null,
+      "unique_id": "model.shop.stg_orders",
+      "compiled": true,
+      "compiled_code": "",
+      "relation_name": null
+    },
+    {
+      "status": "success",
+      "timing": [],
+      "thread_id": "Thread-1",
+      "execution_time": 0.42,
+      "adapter_response": {},
+      "message": "SELECT 4820",
+      "failures": null,
+      "unique_id": "model.shop.dim_customers",
+      "compiled": true,
+      "compiled_code": "",
+      "relation_name": null
+    },
+    {
+      "status": "error",
+      "timing": [],
+      "thread_id": "Thread-1",
+      "execution_time": 0.42,
+      "adapter_response": {},
+      "message": "Database Error in model fct_revenue: division by zero",
+      "failures": null,
+      "unique_id": "model.shop.fct_revenue",
+      "compiled": true,
+      "compiled_code": "",
+      "relation_name": null
+    }
+  ],
+  "elapsed_time": 3.9,
+  "args": {
+    "which": "run",
+    "invocation_command": "dbt run"
+  }
+}

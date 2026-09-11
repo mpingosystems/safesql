@@ -1,0 +1,250 @@
+{
+  "metadata": {
+    "dbt_schema_version": "https://schemas.getdbt.com/dbt/catalog/v1.json",
+    "dbt_version": "1.8.4",
+    "generated_at": "2026-09-10T14:05:40.000000Z"
+  },
+  "nodes": {
+    "model.shop.stg_orders": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "analytics",
+        "name": "stg_orders",
+        "database": "shop",
+        "comment": null,
+        "owner": "dbt"
+      },
+      "columns": {
+        "order_id": {
+          "type": "integer",
+          "index": 1,
+          "name": "order_id",
+          "comment": null
+        },
+        "customer_id": {
+          "type": "integer",
+          "index": 2,
+          "name": "customer_id",
+          "comment": null
+        },
+        "amount": {
+          "type": "numeric(12,2)",
+          "index": 3,
+          "name": "amount",
+          "comment": null
+        },
+        "ordered_at": {
+          "type": "timestamp without time zone",
+          "index": 4,
+          "name": "ordered_at",
+          "comment": null
+        },
+        "order_status": {
+          "type": "character varying(16)",
+          "index": 5,
+          "name": "order_status",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": false,
+          "include": false,
+          "description": ""
+        }
+      },
+      "unique_id": "model.shop.stg_orders"
+    },
+    "model.shop.dim_customers": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "analytics",
+        "name": "dim_customers",
+        "database": "shop",
+        "comment": null,
+        "owner": "dbt"
+      },
+      "columns": {
+        "customer_id": {
+          "type": "integer",
+          "index": 1,
+          "name": "customer_id",
+          "comment": null
+        },
+        "email": {
+          "type": "text",
+          "index": 2,
+          "name": "email",
+          "comment": null
+        },
+        "region": {
+          "type": "text",
+          "index": 3,
+          "name": "region",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": true,
+          "include": false,
+          "description": ""
+        },
+        "row_count": {
+          "id": "row_count",
+          "label": "Row Count",
+          "value": 4820,
+          "include": true,
+          "description": "Approximate row count"
+        }
+      },
+      "unique_id": "model.shop.dim_customers"
+    },
+    "model.shop.fct_revenue": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "analytics",
+        "name": "fct_revenue",
+        "database": "shop",
+        "comment": null,
+        "owner": "dbt"
+      },
+      "columns": {
+        "order_id": {
+          "type": "integer",
+          "index": 1,
+          "name": "order_id",
+          "comment": null
+        },
+        "customer_id": {
+          "type": "integer",
+          "index": 2,
+          "name": "customer_id",
+          "comment": null
+        },
+        "revenue": {
+          "type": "numeric(12,2)",
+          "index": 3,
+          "name": "revenue",
+          "comment": null
+        },
+        "order_date": {
+          "type": "date",
+          "index": 4,
+          "name": "order_date",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": true,
+          "include": false,
+          "description": ""
+        },
+        "row_count": {
+          "id": "row_count",
+          "label": "Row Count",
+          "value": 1284403,
+          "include": true,
+          "description": "Approximate row count"
+        }
+      },
+      "unique_id": "model.shop.fct_revenue"
+    }
+  },
+  "sources": {
+    "source.shop.raw.orders": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "analytics",
+        "name": "orders",
+        "database": "shop",
+        "comment": null,
+        "owner": "dbt"
+      },
+      "columns": {
+        "id": {
+          "type": "integer",
+          "index": 1,
+          "name": "id",
+          "comment": null
+        },
+        "customer_id": {
+          "type": "integer",
+          "index": 2,
+          "name": "customer_id",
+          "comment": null
+        },
+        "amount": {
+          "type": "numeric(12,2)",
+          "index": 3,
+          "name": "amount",
+          "comment": null
+        },
+        "created_at": {
+          "type": "timestamp without time zone",
+          "index": 4,
+          "name": "created_at",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": false,
+          "include": false,
+          "description": ""
+        }
+      },
+      "unique_id": "source.shop.raw.orders"
+    },
+    "source.shop.raw.customers": {
+      "metadata": {
+        "type": "BASE TABLE",
+        "schema": "analytics",
+        "name": "customers",
+        "database": "shop",
+        "comment": null,
+        "owner": "dbt"
+      },
+      "columns": {
+        "id": {
+          "type": "integer",
+          "index": 1,
+          "name": "id",
+          "comment": null
+        },
+        "email": {
+          "type": "text",
+          "index": 2,
+          "name": "email",
+          "comment": null
+        },
+        "region": {
+          "type": "text",
+          "index": 3,
+          "name": "region",
+          "comment": null
+        }
+      },
+      "stats": {
+        "has_stats": {
+          "id": "has_stats",
+          "label": "Has Stats?",
+          "value": false,
+          "include": false,
+          "description": ""
+        }
+      },
+      "unique_id": "source.shop.raw.customers"
+    }
+  },
+  "errors": null
+}

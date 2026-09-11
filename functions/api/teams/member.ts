@@ -1,5 +1,6 @@
 import type { Env } from '../../_shared';
-import { admin, callerId, jsonRes, membershipOf, preflight, seatUsage } from './_shared';
+import { admin, callerId, jsonRes, membershipOf, preflight, seatUsage, isWriteRole } from './_shared';
+import { appendAuditEvent, type AuditActorRole } from '../../../src/services/auditChain';
 
 // Sprint 6B — DELETE /api/teams/member. Removes a member and releases the seat.
 //
@@ -48,8 +49,8 @@ export const onRequestDelete = async (context: {
       403,
     );
   }
-  // Anyone may leave; only owner/manager may remove someone else.
-  if (!removingSelf && role === 'member') {
+  // Anyone may leave; only owner/manager may remove someone else (auditors are read-only).
+  if (!removingSelf && (role === 'member' || !isWriteRole(role))) {
     return jsonRes({ error: 'Only an owner or manager can remove members' }, 403);
   }
 
@@ -79,6 +80,20 @@ export const onRequestDelete = async (context: {
       .update({ plan: 'free' })
       .eq('clerk_user_id', target);
     planRevoked = !planErr;
+  }
+
+  // Chain: who lost access, removed by whom. Never blocks the removal.
+  try {
+    await appendAuditEvent(db, {
+      teamId: team.id,
+      eventType: 'member_removed',
+      actor: clerkUserId,
+      actorRole: role as AuditActorRole,
+      subject: target,
+      payload: { member: target, email: victim.email, role: victim.role, self_removal: removingSelf, plan_revoked: planRevoked },
+    });
+  } catch (e) {
+    console.warn('member_removed chain event not recorded', (e as Error).message);
   }
 
   // Their past validations stay with the team: removing a person should not

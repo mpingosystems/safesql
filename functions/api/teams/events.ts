@@ -86,6 +86,8 @@ export async function handleEvents(request: Request, deps: EventsDeps): Promise<
   const db = deps.db();
   const membership = await membershipOf(db, clerkUserId);
   if (!membership) return new Response(null, { status: 204 });
+  // Sprint 9 (compliance): an auditor is read-only — no chain events are attributed to them from the browser.
+  if (membership.role === 'auditor') return jsonRes({ error: 'Auditors are read-only and cannot record events' }, 403);
 
   try {
     const seq = await appendAuditEvent(db, {

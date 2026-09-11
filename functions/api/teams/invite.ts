@@ -3,6 +3,7 @@ import {
   admin,
   callerId,
   inviteToken,
+  isWriteRole,
   jsonRes,
   membershipOf,
   preflight,
@@ -45,13 +46,14 @@ export const onRequestPost = async (context: {
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return jsonRes({ error: 'A valid email is required' }, 400);
   }
-  const role = body.role === 'manager' ? 'manager' : 'member';
+  // Sprint 9 (compliance): 'auditor' is a read-only seat. Owner is never invited.
+  const role = body.role === 'manager' ? 'manager' : body.role === 'auditor' ? 'auditor' : 'member';
 
   const db = admin(env);
 
   const membership = await membershipOf(db, clerkUserId);
   if (!membership) return jsonRes({ error: 'You do not belong to a team' }, 403);
-  if (membership.role === 'member') {
+  if (membership.role === 'member' || !isWriteRole(membership.role)) {
     return jsonRes({ error: 'Only an owner or manager can invite members' }, 403);
   }
   const { team } = membership;

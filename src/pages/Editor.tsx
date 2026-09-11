@@ -217,7 +217,7 @@ export function EditorPage() {
   const [clearSignal, setClearSignal] = useState(0);
 
   const { appUser, refresh: refreshAppUser } = useAppUser();
-  const { team } = useTeam();
+  const { team, role: teamRole } = useTeam();
   const overLimit = isOverValidationLimit(appUser);
   const isPro = !!appUser && appUser.plan !== 'free';
   // Sprint 5C — free users run the 12 core detectors; Pro+ runs all 35. Signed-out
@@ -658,7 +658,7 @@ export function EditorPage() {
           isPro={isPro}
           onApplyFix={handleApplyFix}
           onFixIssues={handleFixIssues}
-          onRequestApproval={team ? () => { setApprovalMsg(null); setApprovalOpen(true); } : undefined}
+          onRequestApproval={team && teamRole !== 'auditor' ? () => { setApprovalMsg(null); setApprovalOpen(true); } : undefined}
         />
       </aside>
 

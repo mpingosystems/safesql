@@ -37,7 +37,19 @@ export async function callerId(request: Request, env: Env): Promise<string | nul
   return verifyClerkJWT(request, env);
 }
 
-export type TeamRole = 'owner' | 'manager' | 'member';
+export type TeamRole = 'owner' | 'manager' | 'member' | 'auditor';
+
+// Sprint 9 (compliance): the auditor is a read-only seat — audit trail, chain,
+// evidence bundles and the approvals inbox, plus export. No requests, no
+// approvals, no invites, no role changes, no rule/policy edits, and no chain
+// writes attributed to them from the browser. It occupies a seat.
+export const READ_ONLY_ROLES: ReadonlySet<string> = new Set(['auditor']);
+export const ALL_ROLES: ReadonlySet<string> = new Set(['owner', 'manager', 'member', 'auditor']);
+/** Roles an owner or manager may hand out (owner is never assigned — it is the founder). */
+export const ASSIGNABLE_ROLES: ReadonlySet<string> = new Set(['manager', 'member', 'auditor']);
+export function isWriteRole(role: string): boolean {
+  return !READ_ONLY_ROLES.has(role);
+}
 
 export interface Team {
   id: string;

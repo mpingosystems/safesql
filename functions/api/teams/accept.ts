@@ -1,5 +1,6 @@
 import type { Env } from '../../_shared';
-import { admin, callerId, jsonRes, preflight, seatUsage } from './_shared';
+import { admin, callerId, jsonRes, preflight, seatUsage, isWriteRole } from './_shared';
+import { appendAuditEvent, type AuditActorRole } from '../../../src/services/auditChain';
 
 // Sprint 6B — POST /api/teams/accept. Redeems an invitation token.
 //
@@ -32,7 +33,7 @@ export const onRequestPost = async (context: {
 
   const { data: invite } = await db
     .from('team_invitations')
-    .select('id, team_id, email, role, accepted_at, expires_at')
+    .select('id, team_id, email, role, accepted_at, expires_at, invited_by')
     .eq('token', token)
     .maybeSingle();
 
@@ -111,15 +112,38 @@ export const onRequestPost = async (context: {
     .update({ accepted_at: new Date().toISOString() })
     .eq('id', invite.id);
 
+  const seatedRole = (invite.role ?? 'member') as string;
+
   // Grant the seat. Best-effort and reported back: a member who is seated but
   // not upgraded is a support ticket, so the caller should know if it failed.
-  const { error: planErr } = await db
-    .from('users')
-    .update({ plan: team.plan })
-    .eq('clerk_user_id', clerkUserId);
+  // Sprint 9 (compliance): an AUDITOR does not inherit the paid plan — the
+  // role is read-only compliance access with no validation capability, so
+  // unlocking Pro detectors for them would be a free-seat leak.
+  let planGranted = false;
+  if (isWriteRole(seatedRole)) {
+    const { error: planErr } = await db
+      .from('users')
+      .update({ plan: team.plan })
+      .eq('clerk_user_id', clerkUserId);
+    planGranted = !planErr;
+  }
+
+  // Chain: who gained access, as what, invited by whom. Never blocks the join.
+  try {
+    await appendAuditEvent(db, {
+      teamId: team.id,
+      eventType: 'member_added',
+      actor: clerkUserId,
+      actorRole: seatedRole as AuditActorRole,
+      subject: clerkUserId,
+      payload: { member: clerkUserId, email, role: seatedRole, invited_by: invite.invited_by ?? null, invitation_id: invite.id, plan_granted: planGranted },
+    });
+  } catch (e) {
+    console.warn('member_added chain event not recorded', (e as Error).message);
+  }
 
   return jsonRes(
-    { team, role: invite.role ?? 'member', planGranted: !planErr, plan: team.plan },
+    { team, role: seatedRole, planGranted, plan: isWriteRole(seatedRole) ? team.plan : null },
     200,
   );
 };

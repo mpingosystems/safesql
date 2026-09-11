@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
 import { useTeam } from '../hooks/useTeam';
 import { getSupabase } from '../services/supabaseClient';
-import { inviteMember, removeMember, updateMemberRole, type TeamRole } from '../services/teams';
+import { inviteMember, removeMember, type TeamRole } from '../services/teams';
+import { changeMemberRole } from '../services/teamRolesApi';
 import { SITE_URL } from '../config/constants';
 
 // Sprint 9 Part 1 — team member management at /team/members. Managers invite by
@@ -55,8 +56,10 @@ export function TeamMembersPage() {
     }
   };
 
+  // Sprint 9 (compliance): server-authorised + chain-recorded role change.
   const changeRole = async (clerkUserId: string, newRole: TeamRole) => {
-    await updateMemberRole(team.id, clerkUserId, newRole, getSupabase());
+    const res = await changeMemberRole(clerkUserId, newRole);
+    if (!res.ok) setInviteMsg({ ok: false, text: res.error });
     await refresh();
   };
 
@@ -83,7 +86,7 @@ export function TeamMembersPage() {
                   <select value={m.role} onChange={(e) => void changeRole(m.clerk_user_id, e.target.value as TeamRole)} style={sel}>
                     <option value="member">member</option>
                     <option value="manager">manager</option>
-                    <option value="owner">owner</option>
+                    <option value="auditor">auditor (read-only)</option>
                   </select>
                 ) : (
                   <RoleBadge role={m.role} />
@@ -129,6 +132,7 @@ export function TeamMembersPage() {
             <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as TeamRole)} style={sel}>
               <option value="member">member</option>
               <option value="manager">manager</option>
+              <option value="auditor">auditor (read-only)</option>
             </select>
             <button type="button" onClick={() => void invite()} disabled={busy || !email.trim()} style={btn}>Invite</button>
           </div>
@@ -148,7 +152,7 @@ export function TeamMembersPage() {
 }
 
 function RoleBadge({ role }: { role: TeamRole }) {
-  const color = role === 'owner' ? '#a78bfa' : role === 'manager' ? '#22c55e' : '#a1a1aa';
+  const color = role === 'owner' ? '#a78bfa' : role === 'manager' ? '#22c55e' : role === 'auditor' ? '#f59e0b' : '#a1a1aa';
   const label = role.charAt(0).toUpperCase() + role.slice(1);
   return (
     <span style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 999, border: `1px solid ${color}`, color, fontSize: 11, fontWeight: 600 }}>

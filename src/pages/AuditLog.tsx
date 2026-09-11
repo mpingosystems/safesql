@@ -9,8 +9,14 @@ import { auditLogToCsv, type AuditRow } from '../services/auditLog';
 // (by team_id); otherwise fall back to their own events (by user_id).
 export function AuditLogPage() {
   const { appUser } = useAppUser();
-  const { team } = useTeam();
-  const isBusiness = !!appUser && ['business', 'enterprise'].includes(appUser.plan);
+  const { team, role } = useTeam();
+  // Sprint 9 (compliance): an auditor's own users.plan stays free (they never
+  // validate), so gate on the TEAM's plan — or on the auditor role itself.
+  const isBusiness =
+    !!appUser &&
+    (['business', 'enterprise'].includes(appUser.plan) ||
+      (!!team && ['business', 'enterprise'].includes(team.plan)) ||
+      role === 'auditor');
   const [rows, setRows] = useState<AuditRow[]>([]);
 
   useEffect(() => {

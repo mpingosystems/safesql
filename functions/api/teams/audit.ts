@@ -180,7 +180,8 @@ export const onRequestGet = async (context: {
     // export. Role still applies — a plain member does not export the team.
     team_plan: team.plan,
     export_requires_upgrade: !EXPORT_PLANS.has(team.plan),
-    can_export: EXPORT_PLANS.has(team.plan) && (role === 'owner' || role === 'manager'),
+    // Sprint 9 (compliance): exporting evidence is the auditor's job.
+    can_export: EXPORT_PLANS.has(team.plan) && (role === 'owner' || role === 'manager' || role === 'auditor'),
     members: members.map((m) => ({
       clerk_user_id: m.clerk_user_id,
       name: m.display_name || m.email,

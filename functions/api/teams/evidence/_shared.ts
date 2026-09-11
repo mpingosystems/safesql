@@ -13,7 +13,7 @@ export const EVIDENCE_PLANS: ReadonlySet<string> = new Set(['business', 'enterpr
 export const EVIDENCE_UPGRADE_URL = '#/pricing';
 
 /** Roles that may read evidence — every seated role, auditor included. */
-export type EvidenceRole = TeamRole | 'auditor';
+export type EvidenceRole = TeamRole; // 'auditor' is now part of TeamRole
 
 export interface EvidenceAccess {
   db: SupabaseClient;

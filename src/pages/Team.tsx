@@ -45,7 +45,7 @@ interface Health extends HealthSummary {
 
 interface Member {
   clerk_user_id: string;
-  role: 'owner' | 'manager' | 'member';
+  role: 'owner' | 'manager' | 'member' | 'auditor';
   email: string;
   display_name: string | null;
   joined_at: string | null;
@@ -73,7 +73,7 @@ interface RecentRow {
 
 interface Dashboard {
   team: { id: string; name: string; slug: string; plan: string };
-  role: 'owner' | 'manager' | 'member';
+  role: 'owner' | 'manager' | 'member' | 'auditor';
   seats: { members: number; pendingInvites: number; used: number; limit: number | null; full: boolean };
   members: Member[];
   pendingInvites: PendingInvite[];
@@ -212,6 +212,9 @@ export function TeamPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [inviteEmail, setInviteEmail] = useState('');
+  // Sprint 9 (compliance): invite as member / manager / auditor (read-only seat).
+  const [inviteRole, setInviteRole] = useState<'member' | 'manager' | 'auditor'>('member');
+  const [changingRole, setChangingRole] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -299,6 +302,26 @@ export function TeamPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, isPaid, load, loadHealth, loadAudit]);
 
+  // Sprint 9 (compliance): role changes go through PATCH /api/teams/member/role
+  // so they are authorised server-side and recorded on the chain.
+  const changeRole = async (clerkUserId: string, newRole: string) => {
+    setChangingRole(clerkUserId);
+    setNotice(null);
+    try {
+      const res = await authedFetch('/api/teams/member/role', {
+        method: 'PATCH',
+        body: JSON.stringify({ clerk_user_id: clerkUserId, role: newRole }),
+      });
+      const json = (await res.json()) as { error?: string; plan_changed?: string | null };
+      if (!res.ok) setNotice(json.error ?? 'Could not change role.');
+      else if (json.plan_changed === 'revoked') setNotice('Role changed to auditor — read-only access, paid plan released.');
+      else if (json.plan_changed === 'granted') setNotice('Role changed — the team plan now applies to this seat.');
+      await load();
+    } finally {
+      setChangingRole(null);
+    }
+  };
+
   const invite = async () => {
     const email = inviteEmail.trim().toLowerCase();
     if (!email) return;
@@ -307,7 +330,7 @@ export function TeamPage() {
     try {
       const res = await authedFetch('/api/teams/invite', {
         method: 'POST',
-        body: JSON.stringify({ email }),
+        body: JSON.stringify({ email, role: inviteRole }),
       });
       const json = (await res.json()) as { error?: string; emailed?: boolean; alreadyPending?: boolean };
       if (!res.ok) {
@@ -495,8 +518,21 @@ export function TeamPage() {
                   </div>
                   <div style={{ fontSize: 11.5, color: '#71717a' }}>Joined {shortDate(m.joined_at)}</div>
                 </div>
-                <Badge text={m.role === 'owner' ? 'Owner' : m.role === 'manager' ? 'Manager' : 'Member'} tone={m.role === 'owner' ? 'violet' : 'grey'} />
+                <Badge text={m.role === 'owner' ? 'Owner' : m.role === 'manager' ? 'Manager' : m.role === 'auditor' ? 'Auditor' : 'Member'} tone={m.role === 'owner' ? 'violet' : m.role === 'auditor' ? 'amber' : 'grey'} />
                 <Badge text="Active" tone="green" />
+                {(isOwner || role === 'manager') && !self && m.role !== 'owner' && !(role === 'manager' && m.role === 'manager') && (
+                  <select
+                    aria-label={`Change role for ${label}`}
+                    value={m.role}
+                    disabled={changingRole === m.clerk_user_id}
+                    onChange={(e) => void changeRole(m.clerk_user_id, e.target.value)}
+                    style={roleSelect}
+                  >
+                    <option value="member">Member</option>
+                    {isOwner && <option value="manager">Manager</option>}
+                    <option value="auditor">Auditor (read-only)</option>
+                  </select>
+                )}
                 {isOwner && !self && m.role !== 'owner' && (
                   <button
                     type="button"
@@ -520,7 +556,7 @@ export function TeamPage() {
                 </div>
                 <div style={{ fontSize: 11.5, color: '#71717a' }}>Invited {shortDate(i.created_at)}</div>
               </div>
-              <Badge text={i.role === 'manager' ? 'Manager' : 'Member'} tone="grey" />
+              <Badge text={i.role === 'manager' ? 'Manager' : i.role === 'auditor' ? 'Auditor' : 'Member'} tone={i.role === 'auditor' ? 'amber' : 'grey'} />
               <Badge text="Pending" tone="amber" />
             </Row>
           ))}
@@ -559,6 +595,16 @@ export function TeamPage() {
                     fontSize: 13.5,
                   }}
                 />
+                <select
+                  aria-label="Role for the invitee"
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as 'member' | 'manager' | 'auditor')}
+                  style={roleSelect}
+                >
+                  <option value="member">Member</option>
+                  {isOwner && <option value="manager">Manager</option>}
+                  <option value="auditor">Auditor (read-only)</option>
+                </select>
                 <button type="submit" disabled={inviting || !canInvite} style={primaryBtn}>
                   {inviting ? 'Sending…' : 'Send Invite'}
                 </button>
@@ -691,6 +737,15 @@ const primaryBtn: React.CSSProperties = {
   fontSize: 13.5,
   fontWeight: 600,
   cursor: 'pointer',
+};
+
+const roleSelect: React.CSSProperties = {
+  background: '#0f0f11',
+  border: '1px solid #27272a',
+  borderRadius: 6,
+  color: '#e4e4e7',
+  padding: '7px 9px',
+  fontSize: 12.5,
 };
 
 const removeBtn: React.CSSProperties = {

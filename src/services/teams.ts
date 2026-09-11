@@ -12,7 +12,7 @@ const slugSuffix = customAlphabet('abcdefghijklmnopqrstuvwxyz0123456789', 6);
 // matching the approvals.ts / sharedValidation.ts convention.
 
 export type TeamPlan = 'team' | 'business' | 'enterprise';
-export type TeamRole = 'owner' | 'manager' | 'member';
+export type TeamRole = 'owner' | 'manager' | 'member' | 'auditor';
 
 export interface Team {
   id: string;

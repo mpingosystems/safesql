@@ -6,7 +6,7 @@ editor — runs entirely in CI, no network call required.
 ## Usage
 
 ```yaml
-- uses: emkwambe/safesql@v1
+- uses: mpingosystems/safesql@v1
   with:
     sql_files: "queries/**/*.sql"
     schema_file: "schema/production.sql"

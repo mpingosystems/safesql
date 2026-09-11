@@ -6,7 +6,7 @@ import {
   type DbtArtifactInput,
   type DbtContext,
 } from './dbtArtifacts';
-import type { SchemaDefinition, ValidationIssue, ValidationReport } from '../types/validation';
+import type { CustomRule, SchemaDefinition, ValidationIssue, ValidationReport } from '../types/validation';
 import type { PlanTier } from '../config/detectorTiers';
 
 // Shared engine for the CLI and the GitHub Action. Both are thin wrappers around
@@ -41,9 +41,12 @@ export function validateSqlSource(
   // Sprint 5C — omit for the full detector set. The REST API passes the caller's
   // plan; the CLI and GitHub Action run the local engine and pass nothing.
   tier?: PlanTier,
+  // Sprint 9 (compliance) — the caller's team custom rules. The REST API loads
+  // them for Business+ teams; everything else passes nothing (unchanged).
+  customRules?: CustomRule[],
 ): ValidationReport {
   const schema = schemaSql && schemaSql.trim() ? parseDDL(schemaSql, dialect) : undefined;
-  return validateSQL({ sql, schema, dialect, tier });
+  return validateSQL({ sql, schema, dialect, tier, ...(customRules && customRules.length > 0 ? { customRules } : {}) });
 }
 
 // ── Sprint 8 (dbt) ───────────────────────────────────────────────────────────
@@ -79,11 +82,12 @@ export function validateSqlWithDbt(
   dialect: CliDialect = 'postgresql',
   tier?: PlanTier,
   currentModel?: string,
+  customRules?: CustomRule[],
 ): ValidationReport {
   const userSchema = schemaSql && schemaSql.trim() ? parseDDL(schemaSql, dialect) : undefined;
   const schema = mergeSchemas(userSchema, dbt.schema);
   const context: DbtContext = currentModel ? { ...dbt.context, currentModel } : dbt.context;
-  return validateSQL({ sql, schema, dialect, tier, dbtContext: context });
+  return validateSQL({ sql, schema, dialect, tier, dbtContext: context, ...(customRules && customRules.length > 0 ? { customRules } : {}) });
 }
 
 // Provenance summary for reports and API responses. Says what was loaded so a

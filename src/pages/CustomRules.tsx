@@ -1,15 +1,21 @@
 import { useState } from 'react';
 import { useAppUser } from '../hooks/useAppUser';
+import { useCustomRules } from '../hooks/useCustomRules';
+import { createRule, deleteRule, updateRule, type TeamRule } from '../services/rulesApi';
 import { validateSQL } from '../services/sqlValidator';
 import { apiUrl } from '../config/api';
 import type { SuggestedRule } from '../services/ruleSuggestion';
 import type { CustomRule, CustomRuleType } from '../types/validation';
 import { TOTAL_DETECTORS } from '../config/detectorTiers';
 
-// Sprint 8 Part 5 — custom rules authoring at /team/rules (Business tier).
-// v1: build a rule + test it live against a sample query (the engine runs
-// client-side). Persistence to custom_rules is wired once the migration is
-// applied; this page focuses on authoring + the "test rule" loop.
+// Sprint 8 Part 5 — custom rules authoring at /team/rules.
+// v1 built a rule + tested it live against a sample query (engine client-side).
+//
+// Sprint 9 (compliance): rules are now team POLICY, saved through
+// /api/teams/rules (owner / manager), listed for every seat, toggled
+// (soft delete) or deleted (owner, hard delete) — every change lands on the
+// team's tamper-evident chain. Authoring is Team+; the API/CI enforce the
+// rules on Business+ and this page says which is the case.
 const RULE_TYPES: { value: CustomRuleType; label: string; fields: string[] }[] = [
   { value: 'required_filter', label: 'Required filter (table + column)', fields: ['table', 'column'] },
   { value: 'forbidden_table', label: 'Forbidden table', fields: ['table'] },
@@ -20,7 +26,13 @@ const RULE_TYPES: { value: CustomRuleType; label: string; fields: string[] }[] =
 
 export function CustomRulesPage() {
   const { appUser } = useAppUser();
-  const isBusiness = !!appUser && ['business', 'enterprise'].includes(appUser.plan);
+  const isBusiness = !!appUser && ['team', 'business', 'enterprise'].includes(appUser.plan);
+  const { all: savedRules, enforcedInApi, canWrite, myRole, refresh, error: rulesError } = useCustomRules();
+  const isOwner = myRole === 'owner';
+  const [severity, setSeverity] = useState<'error' | 'warning' | 'suggestion'>('warning');
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [busyRule, setBusyRule] = useState<string | null>(null);
 
   const [name, setName] = useState('');
   const [ruleType, setRuleType] = useState<CustomRuleType>('required_filter');
@@ -87,11 +99,44 @@ export function CustomRulesPage() {
     setResult(fired ? '✓ Rule fires on this query' : '○ Rule does not fire');
   };
 
+  const saveRule = async () => {
+    setSaving(true);
+    setSaveMsg(null);
+    const res = await createRule({ name, rule_type: ruleType, config: { ...cfg, ...(message ? { message } : {}) }, severity });
+    setSaving(false);
+    if (!res.ok) {
+      setSaveMsg(`Could not save: ${res.error}`);
+      return;
+    }
+    setSaveMsg(`✓ Saved "${res.rule.name}"${res.event_seq ? ` — chain #${res.event_seq}` : ''}`);
+    setName('');
+    setCfg({});
+    setMessage('');
+    await refresh();
+  };
+
+  const toggleRule = async (r: TeamRule) => {
+    setBusyRule(r.id);
+    const res = await updateRule(r.id, { active: !(r.active !== false) });
+    if (!res.ok) setSaveMsg(`Could not update: ${res.error}`);
+    setBusyRule(null);
+    await refresh();
+  };
+
+  const removeRule = async (r: TeamRule) => {
+    if (!window.confirm(`Delete "${r.name}" permanently? The rule's full definition is retained on the audit chain.`)) return;
+    setBusyRule(r.id);
+    const res = await deleteRule(r.id);
+    if (!res.ok) setSaveMsg(`Could not delete: ${res.error}`);
+    setBusyRule(null);
+    await refresh();
+  };
+
   if (!isBusiness) {
     return (
       <Shell>
         <h1 style={{ fontSize: 22 }}>Custom Rules</h1>
-        <p style={{ color: '#a1a1aa' }}>Custom rules are a Business feature. <a href="#/pricing" style={{ color: '#a78bfa' }}>Upgrade →</a></p>
+        <p style={{ color: '#a1a1aa' }}>Custom rules are a Team feature (enforced in CI and the API on Business). <a href="#/pricing" style={{ color: '#a78bfa' }}>Upgrade →</a></p>
       </Shell>
     );
   }
@@ -100,6 +145,46 @@ export function CustomRulesPage() {
     <Shell>
       <h1 style={{ fontSize: 22 }}>Custom Rules</h1>
       <p style={{ color: '#a1a1aa', fontSize: 13 }}>Encode your team's SQL policy on top of the {TOTAL_DETECTORS} semantic detectors.</p>
+      <div style={{ ...card, borderColor: enforcedInApi ? '#166534' : '#78350f', fontSize: 12.5, color: '#d4d4d8' }}>
+        {enforcedInApi
+          ? '✓ Enforced everywhere: these rules run in the editor and in every API, CI and dbt validation for your team.'
+          : 'Rules run in the editor for your team. Enforcement in the API, GitHub Action and dbt-safesql requires the Business plan.'}
+        {' '}<a href="#/pricing" style={{ color: '#a78bfa' }}>{enforcedInApi ? '' : 'Upgrade →'}</a>
+      </div>
+
+      <h2 style={{ fontSize: 14, color: '#a1a1aa', marginTop: 16 }}>Team rules ({savedRules.length})</h2>
+      <div style={card}>
+        {rulesError && <p style={{ color: '#f87171', fontSize: 12.5, marginTop: 0 }}>{rulesError}</p>}
+        {savedRules.length === 0 ? (
+          <p style={{ color: '#71717a', fontSize: 13, margin: 0 }}>No rules saved yet. Build one below and save it.</p>
+        ) : (
+          savedRules.map((r) => (
+            <div key={r.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #27272a', opacity: r.active === false ? 0.55 : 1 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13.5 }}>
+                  {r.name}{' '}
+                  <span style={{ color: '#71717a', fontSize: 11.5 }}>· {r.rule_type} · {r.severity ?? 'warning'}{r.active === false ? ' · inactive' : ''}</span>
+                </div>
+                <div style={{ fontSize: 11.5, color: '#71717a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {Object.entries(r.config).filter(([k]) => k !== 'message').map(([k, v]) => `${k}=${String(v)}`).join('  ')}
+                  {r.created_by_email ? ` · by ${r.created_by_email}` : ''}{r.last_event_seq ? ` · chain #${r.last_event_seq}` : ''}
+                </div>
+              </div>
+              {canWrite && (
+                <button type="button" onClick={() => void toggleRule(r)} disabled={busyRule === r.id} style={ghostBtn}>
+                  {r.active === false ? 'Activate' : 'Deactivate'}
+                </button>
+              )}
+              {isOwner && (
+                <button type="button" onClick={() => void removeRule(r)} disabled={busyRule === r.id} style={{ ...ghostBtn, color: '#f87171', borderColor: '#7f1d1d' }}>
+                  Delete
+                </button>
+              )}
+            </div>
+          ))
+        )}
+        {saveMsg && <div style={{ marginTop: 8, fontSize: 12.5, color: saveMsg.startsWith('✓') ? '#22c55e' : '#f59e0b' }}>{saveMsg}</div>}
+      </div>
 
       <h2 style={{ fontSize: 14, color: '#a1a1aa', marginTop: 16 }}>Describe a rule</h2>
       <div style={card}>
@@ -146,9 +231,21 @@ export function CustomRulesPage() {
       <h2 style={{ fontSize: 14, color: '#a1a1aa', marginTop: 20 }}>Test rule</h2>
       <div style={card}>
         <textarea value={testSql} onChange={(e) => setTestSql(e.target.value)} style={{ ...inp, minHeight: 70, fontFamily: 'monospace' }} />
-        <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <button type="button" onClick={testRule} style={btn}>Test rule</button>
           {result && <span style={{ color: result.startsWith('✓') ? '#22c55e' : '#71717a', fontSize: 13 }}>{result}</span>}
+          {canWrite && (
+            <>
+              <select value={severity} onChange={(e) => setSeverity(e.target.value as 'error' | 'warning' | 'suggestion')} style={{ ...inp, width: 'auto' }}>
+                <option value="error">error</option>
+                <option value="warning">warning</option>
+                <option value="suggestion">suggestion</option>
+              </select>
+              <button type="button" onClick={() => void saveRule()} disabled={saving || !name.trim()} style={btn}>
+                {saving ? 'Saving…' : 'Save rule'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </Shell>
@@ -168,4 +265,5 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 const card: React.CSSProperties = { border: '1px solid #27272a', borderRadius: 8, padding: 16, background: '#18181b', marginTop: 10 };
 const inp: React.CSSProperties = { width: '100%', background: '#0a0a0a', color: '#e4e4e7', border: '1px solid #27272a', borderRadius: 5, padding: '7px 10px', fontSize: 13 };
+const ghostBtn: React.CSSProperties = { background: 'transparent', color: '#a1a1aa', border: '1px solid #3f3f46', borderRadius: 6, padding: '5px 10px', fontSize: 12, cursor: 'pointer' };
 const btn: React.CSSProperties = { background: '#7c3aed', color: 'white', border: 'none', borderRadius: 6, padding: '7px 14px', fontWeight: 600, fontSize: 13, cursor: 'pointer' };

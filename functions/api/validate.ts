@@ -12,7 +12,7 @@ import { hashApiKey, PLAN_API_LIMITS } from '../../src/services/apiKeys';
 import { appendAuditEvent, validationRunPayload, type AuditActorRole, type AuditEventInput } from '../../src/services/auditChain';
 import { membershipOf } from './teams/_shared';
 import type { PlanTier } from '../../src/config/detectorTiers';
-import type { ValidationReport } from '../../src/types/validation';
+import type { CustomRule, ValidationReport } from '../../src/types/validation';
 import { DETECTOR_VERSION } from '../../src/config/detectorVersion';
 
 // Sprint 7 Part 3 — REST API. POST /api/validate runs the same 35-detector
@@ -67,6 +67,24 @@ export interface ValidateDeps {
   // inside a try/catch that swallows everything, so it can never change the
   // status, body or success of the validation itself.
   recordEvent?(input: Omit<AuditEventInput, 'teamId' | 'actorRole'> & { clerkUserId: string }): Promise<void>;
+  // Sprint 9 (compliance) — optional. The caller's team custom rules, already
+  // gated by team plan (Business+) inside the dep. A throwing loader yields
+  // no rules; it never fails the validation.
+  loadCustomRules?(clerkUserId: string): Promise<CustomRule[]>;
+}
+
+// Plans whose team policy (custom rules) is ENFORCED by the API. Rules can be
+// authored on Team; applying them in CI/API is what the Business card sells.
+export const RULE_ENFORCEMENT_PLANS: ReadonlySet<string> = new Set(['business', 'enterprise']);
+
+async function customRulesFor(deps: ValidateDeps, auth: AuthResult): Promise<CustomRule[]> {
+  if (!deps.loadCustomRules || !auth.clerkUserId) return [];
+  try {
+    return await deps.loadCustomRules(auth.clerkUserId);
+  } catch (e) {
+    console.warn('custom rules not loaded', (e as Error).message);
+    return [];
+  }
 }
 
 async function sha256Hex(text: string): Promise<string> {
@@ -175,7 +193,8 @@ export async function handleValidate(request: Request, deps: ValidateDeps): Prom
     };
     const dbt = prepareDbtContext(artifacts);
     const currentModel = typeof d.currentModel === 'string' && d.currentModel ? d.currentModel : undefined;
-    const report = validateSqlWithDbt(body.sql, dbt, ddl, dialect, tier, currentModel);
+    const rules = await customRulesFor(deps, auth);
+    const report = validateSqlWithDbt(body.sql, dbt, ddl, dialect, tier, currentModel, rules);
     await recordValidationRun(deps, auth, report, {
       sql: body.sql, dialect, tier,
       dbt: { currentModel, sensitiveTagged: summarizeDbtContext(dbt.context).sensitiveTagged },
@@ -188,14 +207,16 @@ export async function handleValidate(request: Request, deps: ValidateDeps): Prom
         // Provenance only — never the full context. Lets a client tell "no
         // finding" from "no context loaded".
         dbtContext: { ...summarizeDbtContext(dbt.context), warnings: dbt.warnings },
+        customRulesApplied: rules.length,
       },
       200,
     );
   }
 
-  const report = validateSqlSource(body.sql, ddl, dialect, tier);
+  const rules = await customRulesFor(deps, auth);
+  const report = validateSqlSource(body.sql, ddl, dialect, tier, rules);
   await recordValidationRun(deps, auth, report, { sql: body.sql, dialect, tier });
-  return jsonRes({ ...report, tier, detectorVersion: DETECTOR_VERSION }, 200);
+  return jsonRes({ ...report, tier, detectorVersion: DETECTOR_VERSION, customRulesApplied: rules.length }, 200);
 }
 
 // ── Cloudflare Pages Function wrappers ───────────────────────────────────────
@@ -204,6 +225,16 @@ export const onRequestOptions = (): Response => new Response(null, { status: 204
 export const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
   const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+  // One membership lookup per request, shared by loadCustomRules + recordEvent.
+  const membershipCache = new Map<string, ReturnType<typeof membershipOf>>();
+  const membershipFor = (clerkUserId: string) => {
+    let pending = membershipCache.get(clerkUserId);
+    if (!pending) {
+      pending = membershipOf(supabase, clerkUserId);
+      membershipCache.set(clerkUserId, pending);
+    }
+    return pending;
+  };
 
   const deps: ValidateDeps = {
     async authenticate(token) {
@@ -246,8 +277,21 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
     // Sprint 9 (compliance): put the validation on the owner's team chain.
     // membershipOf resolves the team + role; a key whose owner has no team
     // records nothing. Errors are swallowed by the caller.
+    // Sprint 9 (compliance): the key owner's team rules, enforced for Business+
+    // teams only.
+    async loadCustomRules(clerkUserId) {
+      const membership = await membershipFor(clerkUserId);
+      if (!membership || !RULE_ENFORCEMENT_PLANS.has(membership.team.plan)) return [];
+      const { data } = await supabase
+        .from('custom_rules')
+        .select('id, name, description, rule_type, config, severity, active')
+        .eq('team_id', membership.team.id)
+        .eq('active', true)
+        .order('created_at', { ascending: true });
+      return (data ?? []) as CustomRule[];
+    },
     async recordEvent(input) {
-      const membership = await membershipOf(supabase, input.clerkUserId);
+      const membership = await membershipFor(input.clerkUserId);
       if (!membership) return;
       await appendAuditEvent(supabase, {
         teamId: membership.team.id,

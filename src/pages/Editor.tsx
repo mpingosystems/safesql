@@ -25,6 +25,7 @@ import { AuthControls } from '../components/AuthControls';
 import { useAppUser, isOverValidationLimit, FREE_LIMITS } from '../hooks/useAppUser';
 import { useTeam } from '../hooks/useTeam';
 import { requestApproval } from '../services/approvalsApi';
+import { useCustomRules } from '../hooks/useCustomRules';
 import { DETECTOR_VERSION } from '../config/detectorVersion';
 
 type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
@@ -114,7 +115,7 @@ function TeamMenu({ plan }: { plan: string }) {
     { label: 'Analytics', href: '#/team/analytics' },
     { label: 'Approvals', href: '#/team/approvals' },
     { label: 'Audit Log', href: '#/team/audit' },
-    ...(plan === 'business' ? [{ label: 'Custom Rules', href: '#/team/rules' }] : []),
+    ...(plan === 'team' || plan === 'business' || plan === 'enterprise' ? [{ label: 'Custom Rules', href: '#/team/rules' }] : []),
   ];
 
   return (
@@ -218,6 +219,8 @@ export function EditorPage() {
 
   const { appUser, refresh: refreshAppUser } = useAppUser();
   const { team, role: teamRole } = useTeam();
+  // Sprint 9 (compliance): the team's custom rules run in the editor exactly as in the API.
+  const { rules: customRules } = useCustomRules();
   const overLimit = isOverValidationLimit(appUser);
   const isPro = !!appUser && appUser.plan !== 'free';
   // Sprint 5C — free users run the 12 core detectors; Pro+ runs all 35. Signed-out
@@ -265,7 +268,7 @@ export function EditorPage() {
     // briefly show last validation's errors against this validation's SQL.
     setReport(null);
 
-    let next = validateSQL({ sql, schema: schema ?? undefined, dialect, source, tier });
+    let next = validateSQL({ sql, schema: schema ?? undefined, dialect, source, tier, customRules });
     setReport(next);
     setLastValidatedAt(new Date());
 
@@ -289,7 +292,7 @@ export function EditorPage() {
         if (ok) void refreshAppUser(); // pull updated count
       });
     }
-  }, [sql, schema, dialect, source, tier, aiEnabled, appUser, activeSchemaId, refreshAppUser, overLimit]);
+  }, [sql, schema, dialect, source, tier, customRules, aiEnabled, appUser, activeSchemaId, refreshAppUser, overLimit]);
 
   // PQ4 — apply a mechanical fix, rewrite the editor, and re-validate.
   const handleApplyFix = useCallback(
@@ -297,7 +300,7 @@ export function EditorPage() {
       const next = applyFix(sql, issue);
       if (!next || next === sql) return;
       setSql(next);
-      const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source, tier });
+      const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source, tier, customRules });
       setReport(nextReport);
       setLastValidatedAt(new Date());
       if (appUser?.id && !overLimit) {
@@ -314,7 +317,7 @@ export function EditorPage() {
         });
       }
     },
-    [sql, schema, dialect, source, tier, appUser, overLimit, activeSchemaId, refreshAppUser],
+    [sql, schema, dialect, source, tier, customRules, appUser, overLimit, activeSchemaId, refreshAppUser],
   );
 
   // "Fix Issues First" — apply every auto-fixable error in one pass, then
@@ -329,7 +332,7 @@ export function EditorPage() {
     }
     if (next === sql) return;
     setSql(next);
-    const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source, tier });
+    const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source, tier, customRules });
     setReport(nextReport);
     setLastValidatedAt(new Date());
     if (appUser?.id && !overLimit) {
@@ -345,7 +348,7 @@ export function EditorPage() {
         if (ok) void refreshAppUser();
       });
     }
-  }, [report, sql, schema, dialect, source, tier, appUser, overLimit, activeSchemaId, refreshAppUser]);
+  }, [report, sql, schema, dialect, source, tier, customRules, appUser, overLimit, activeSchemaId, refreshAppUser]);
 
   const handleValidationFromEditor = (next: Report) => {
     setReport(next);

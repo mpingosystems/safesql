@@ -66,6 +66,9 @@ export const PRO_DETECTOR_SLUGS: DetectorId[] = [
   'WINDOW_MISSING_ORDER',
   'COALESCE_IN_JOIN_KEY',
   'IMPLICIT_TIMEZONE',
+  // ── Sprint 8 (dbt manifest context) — Pro; require request.dbtContext ─────
+  'UNAPPROVED_SOURCE',
+  'FINANCE_TAG_UNVALIDATED',
 ];
 
 // Total built-in detector count. Single source of truth for every UI string —

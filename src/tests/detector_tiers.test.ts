@@ -36,10 +36,10 @@ describe('detector tier lists', () => {
     expect(FREE_DETECTOR_COUNT).toBe(12);
   });
 
-  it('pro tier has all 33 built-in detectors, no duplicates', () => {
-    expect(PRO_DETECTOR_SLUGS).toHaveLength(33);
-    expect(new Set(PRO_DETECTOR_SLUGS).size).toBe(33);
-    expect(TOTAL_DETECTORS).toBe(33);
+  it('pro tier has all 35 built-in detectors, no duplicates', () => {
+    expect(PRO_DETECTOR_SLUGS).toHaveLength(35);
+    expect(new Set(PRO_DETECTOR_SLUGS).size).toBe(35);
+    expect(TOTAL_DETECTORS).toBe(35);
   });
 
   it('pro is a strict superset of free', () => {
@@ -55,12 +55,12 @@ describe('detector tier lists', () => {
   it('maps every paid tier to the full set', () => {
     expect(getDetectorsForTier('free')).toHaveLength(12);
     for (const tier of ['pro', 'team', 'business', 'enterprise'] as const) {
-      expect(getDetectorsForTier(tier)).toHaveLength(33);
+      expect(getDetectorsForTier(tier)).toHaveLength(35);
     }
   });
 
   it('reports 21 gated detectors on free and 0 on pro', () => {
-    expect(gatedDetectorCount('free')).toBe(21);
+    expect(gatedDetectorCount('free')).toBe(23);
     expect(gatedDetectorCount('pro')).toBe(0);
   });
 
@@ -104,13 +104,13 @@ describe('validateSQL tier gating', () => {
     const free = validateSQL({ sql: FANOUT_SQL, schema, dialect: 'postgresql', tier: 'free' });
     const pro = validateSQL({ sql: FANOUT_SQL, schema, dialect: 'postgresql', tier: 'pro' });
     expect(free.detectorsRun).toHaveLength(12);
-    expect(pro.detectorsRun).toHaveLength(33);
+    expect(pro.detectorsRun).toHaveLength(35);
   });
 
   it('sets upgradePrompt only when findings were actually withheld', () => {
     const free = validateSQL({ sql: FANOUT_SQL, schema, dialect: 'postgresql', tier: 'free' });
     expect(free.upgradePrompt).toBeTruthy();
-    expect(free.upgradePrompt).toContain('33');
+    expect(free.upgradePrompt).toContain('35');
 
     // A query whose only finding is a free detector withholds nothing.
     const clean = validateSQL({

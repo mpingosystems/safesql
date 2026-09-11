@@ -1,4 +1,5 @@
 import type { PlanTier } from '../config/detectorTiers';
+import type { DbtContext } from '../services/dbtArtifacts';
 
 export type SqlSource = 'cursor' | 'copilot' | 'chatgpt' | 'manual' | 'unknown';
 
@@ -17,6 +18,10 @@ export interface ValidationRequest {
   // every internal caller and every pre-5C test gets all detectors unchanged.
   // Only 'free' narrows the run to FREE_DETECTORS.
   tier?: PlanTier;
+  // Sprint 8 (dbt) — context parsed from manifest/catalog/run_results by
+  // parseDbtArtifacts. UNAPPROVED_SOURCE and FINANCE_TAG_UNVALIDATED read it;
+  // both are no-ops when it is absent, so every non-dbt caller is unchanged.
+  dbtContext?: DbtContext;
 }
 
 export type CustomRuleType =
@@ -121,6 +126,9 @@ export type DetectorId =
   | 'COALESCE_IN_JOIN_KEY'
   | 'IMPLICIT_TIMEZONE'
   | 'WINDOW_MISSING_ORDER'
+  // ── Sprint 8 (dbt manifest context) ───────────────────────────────────────
+  | 'UNAPPROVED_SOURCE'
+  | 'FINANCE_TAG_UNVALIDATED'
   | 'CUSTOM_RULE'
   | 'SYNTAX_ERROR';
 

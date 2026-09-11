@@ -26,11 +26,11 @@ describe('POST /api/validate', () => {
   });
 
   // ── Sprint 5C — the plan on the API key decides the detector set ───────────
-  it('pro key runs all 33 detectors and reports the tier', async () => {
+  it('pro key runs all 35 detectors and reports the tier', async () => {
     const res = await handleValidate(req({ sql: 'SELECT 1' }), okAuth);
     const json = await res.json();
     expect(json.tier).toBe('pro');
-    expect(json.detectorsRun).toHaveLength(33);
+    expect(json.detectorsRun).toHaveLength(35);
   });
 
   it('free key runs only the 12 core detectors', async () => {

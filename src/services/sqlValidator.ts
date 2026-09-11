@@ -8,6 +8,7 @@ import type {
 } from '../types/validation';
 import { unwrapName } from './schemaParser';
 import { evaluateCustomRules } from './customRuleEngine';
+import type { DbtContext, DbtModelMeta } from './dbtArtifacts';
 import {
   TOTAL_DETECTORS,
   getDetectorsForTier,
@@ -115,6 +116,10 @@ export function validateSQL(request: ValidationRequest): ValidationReport {
   issues.push(...detectImplicitTimezone(ast));
   issues.push(...detectDialectLimitTop(request.sql, request.dialect));
 
+  // ── Sprint 8 (dbt): manifest-context detectors — no-ops without request.dbtContext ─
+  issues.push(...detectUnapprovedSource(ast, request.schema, request.dbtContext));
+  issues.push(...detectFinanceTagUnvalidated(ast, request.schema, request.dbtContext));
+
   // ── Sprint 8: team custom rules (Business tier) — after the built-in detectors ─
   if (request.customRules && request.customRules.length > 0) {
     issues.push(...evaluateCustomRules(request.sql, ast, request.schema, request.customRules));
@@ -181,6 +186,9 @@ const HIGH_RISK_WARNINGS = new Set<DetectorId>([
   // Sprint 3b additions:
   'COALESCE_IN_JOIN_KEY',
   'WINDOW_MISSING_ORDER',
+  // Sprint 8 (dbt manifest context):
+  'UNAPPROVED_SOURCE',
+  'FINANCE_TAG_UNVALIDATED',
 ]);
 
 // §11 Score Policy. Tier of the WORST finding sets the band; additional findings
@@ -2247,5 +2255,140 @@ function detectDialectLimitTop(sql: string, dialect: string): ValidationIssue[] 
     });
   }
 
+  return issues;
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Sprint 8 — dbt manifest context detectors
+// ════════════════════════════════════════════════════════════════════════════
+// Both read the DbtContext produced by parseDbtArtifacts and are strict
+// no-ops without it, so every non-dbt caller is unchanged. Neither reads the
+// schema today; the parameter keeps the Sprint 8 detectors on one shape so a
+// later schema-aware refinement does not change the call site.
+
+// Every base relation a statement references (FROM + JOIN targets), with the
+// clause it appears in. CTE / subquery aliases are locally defined, not dbt
+// relations, and are skipped. Statements are treated independently.
+function collectRelationRefs(stmt: any): Array<{ name: string; clause: 'FROM' | 'JOIN' }> {
+  const out: Array<{ name: string; clause: 'FROM' | 'JOIN' }> = [];
+  if (!stmt) return out;
+  const local = identSet(collectLocalTableNames(stmt));
+  const seen = new Set<string>();
+  const push = (name: unknown, clause: 'FROM' | 'JOIN') => {
+    if (typeof name !== 'string' || !name || hasIdent(local, name) || hasIdent(seen, name)) return;
+    seen.add(name.toLowerCase());
+    out.push({ name, clause });
+  };
+  if (Array.isArray(stmt.from)) {
+    for (const f of stmt.from) push(f?.table, f?.join ? 'JOIN' : 'FROM');
+  }
+  if (stmt.type === 'update' || stmt.type === 'delete' || stmt.type === 'insert') {
+    const tables: any[] = Array.isArray(stmt.table) ? stmt.table : stmt.table ? [stmt.table] : [];
+    for (const t of tables) push(typeof t === 'string' ? t : t?.table, 'FROM');
+  }
+  return out;
+}
+
+// ── UNAPPROVED_SOURCE ────────────────────────────────────────────────────────
+// A query reads a raw dbt source directly while a trusted (non-ephemeral)
+// model built from that source exists. The nearest such model is named as
+// the substitute. Exemption is STRUCTURAL, not name-based: the model being
+// validated is itself one of the source's downstream marts AND depends on the
+// source directly — i.e. it is the staging model whose job is to read the raw
+// table. A mart reaching past its staging layer, or an ad-hoc query with no
+// currentModel, is flagged.
+function detectUnapprovedSource(
+  ast: any,
+  _schema: SchemaDefinition | undefined,
+  context?: DbtContext,
+): ValidationIssue[] {
+  if (!context) return [];
+  const issues: ValidationIssue[] = [];
+  const current = context.currentModel ? context.models.get(context.currentModel.toLowerCase()) : undefined;
+
+  for (const stmt of asStatements(ast)) {
+    for (const ref of collectRelationRefs(stmt)) {
+      const source = context.sources.get(ref.name.toLowerCase());
+      if (!source) continue;
+      const marts = context.sourceToMart.get(ref.name.toLowerCase()) ?? [];
+      if (marts.length === 0) continue; // raw source with no curated alternative — nothing to recommend
+
+      if (current && isDirectStagingModelFor(current, source.relation, marts)) continue;
+
+      const nearest = marts[0];
+      const others = marts.slice(1);
+      issues.push({
+        id: 'UNAPPROVED_SOURCE',
+        severity: 'warning',
+        title: `Raw source "${ref.name}" queried directly`,
+        description:
+          `Query reads from raw source '${ref.name}' directly. A trusted mart '${nearest}' exists downstream. ` +
+          `Consider querying the mart instead.`,
+        fix:
+          `Replace "${ref.name}" with "${nearest}" — the nearest dbt model built from this source` +
+          (others.length > 0 ? ` (also available: ${others.join(', ')}).` : '.'),
+        offendingClause: ref.clause,
+        offendingTable: ref.name,
+        metadata: { table: ref.name, sourceName: source.sourceName, nearestMart: nearest, marts },
+      });
+    }
+  }
+  return issues;
+}
+
+function isDirectStagingModelFor(current: DbtModelMeta, sourceRelation: string, marts: string[]): boolean {
+  const isMart = marts.some((m) => identEq(m, current.relation));
+  const readsDirectly = current.dependsOn.some((d) => identEq(d, sourceRelation));
+  return isMart && readsDirectly;
+}
+
+// ── FINANCE_TAG_UNVALIDATED ──────────────────────────────────────────────────
+// A referenced relation carries a sensitive tag (default finance / pii) and
+// its most recent dbt run did not succeed — or it has no run result at all.
+// dbt's status vocabulary is compared raw: anything other than 'success'
+// (error, fail, skip, warn, pass, or absent) is a reason to review before the
+// numbers leave the warehouse.
+function detectFinanceTagUnvalidated(
+  ast: any,
+  _schema: SchemaDefinition | undefined,
+  context?: DbtContext,
+): ValidationIssue[] {
+  if (!context) return [];
+  const issues: ValidationIssue[] = [];
+  const sensitive = context.sensitiveTags.map((t) => t.toLowerCase());
+
+  for (const stmt of asStatements(ast)) {
+    for (const ref of collectRelationRefs(stmt)) {
+      const key = ref.name.toLowerCase();
+      const rel = context.models.get(key) ?? context.sources.get(key);
+      if (!rel) continue;
+      // First matching tag in the configured order, so 'finance' wins over
+      // 'pii' when a relation carries both.
+      const tag = sensitive.find((t) => rel.tags.includes(t));
+      if (!tag) continue;
+      if (rel.lastRunStatus === 'success') continue;
+
+      const status = rel.lastRunStatus ?? 'unknown';
+      issues.push({
+        id: 'FINANCE_TAG_UNVALIDATED',
+        severity: 'warning',
+        title: `"${ref.name}" is tagged ${tag} and its last run did not succeed`,
+        description:
+          `Query references '${ref.name}' tagged '${tag}'. Last validation status: ${status}. ` +
+          `Review required before export or scheduling.`,
+        fix:
+          `Re-run and validate "${ref.name}" (dbt run --select ${rel.relation} && dbt test --select ${rel.relation}) ` +
+          `before exporting or scheduling results built on it.`,
+        offendingClause: ref.clause,
+        offendingTable: ref.name,
+        metadata: {
+          table: ref.name,
+          tag,
+          lastRunStatus: status,
+          ...(rel.owner ? { owner: rel.owner } : {}),
+        },
+      });
+    }
+  }
   return issues;
 }

@@ -6,7 +6,7 @@
 > numbers that drive real decisions.
 
 SQLFluff checks style. SafeSQL Pro checks logic. On save, this extension
-validates the active `.sql` file against 33 deterministic detectors and
+validates the active `.sql` file against 35 deterministic detectors and
 underlines the offending clause — before the query ever reaches your warehouse.
 
 ![shield](icon.png)

@@ -15,7 +15,7 @@ const program = new Command();
 program
   .name('safesql')
   .description('Pre-execution semantic SQL validation')
-  .version('0.4.0');
+  .version('0.10.0');
 
 program
   .command('validate <file>')

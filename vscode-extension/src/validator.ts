@@ -3,7 +3,7 @@ import { SafeSQLClient, type ValidationResult } from '@safesqlpro/sdk';
 import type { SafeSQLConfig } from './config';
 
 // Calls the SafeSQL Pro API through @safesqlpro/sdk. No validator logic lives
-// in the extension — the 33-detector engine runs server-side.
+// in the extension — the 35-detector engine runs server-side.
 
 /** Reads the configured DDL file relative to the document's workspace folder. */
 export async function loadSchema(

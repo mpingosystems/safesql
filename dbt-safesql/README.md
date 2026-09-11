@@ -149,6 +149,7 @@ threshold print as `OK <file> (score: N)`.
 | `--api-key`      | `$SAFESQL_API_KEY` | SafeSQL API key (Pro+) |
 | `--threshold`    | `70` (`$SAFESQL_THRESHOLD`) | Fail models scoring below this; models at or above it are not reported |
 | `--warn-only`    | off (`$SAFESQL_WARN_ONLY`) | Print findings but always exit 0 |
+| `--target-dir`   | `<project-dir>/target` (`$SAFESQL_DBT_TARGET`) | dbt `target/` directory; when `manifest.json` is there, the artifacts are sent instead of the schema.yml DDL |
 
 ### `--threshold`
 
@@ -178,6 +179,36 @@ when introducing SafeSQL to an existing project with a backlog of findings.
 dbt-safesql --warn-only
 ```
 
+### `--target-dir` (dbt artifacts)
+
+After `dbt compile` / `dbt run` (and ideally `dbt docs generate`), the
+`target/` directory holds `manifest.json`, `catalog.json` and
+`run_results.json`. When a manifest is found, `dbt-safesql` sends those instead
+of the DDL it would otherwise build from `schema.yml` — and gets a strictly
+better schema for it: every column (not just the documented ones), real
+warehouse types, and PK / FK / nullable derived from your `unique`, `not_null`
+and `relationships` tests. Two detectors only run with artifacts:
+
+- `UNAPPROVED_SOURCE` — a model reads a raw `source()` directly while a
+  trusted (non-ephemeral) model built from that source exists. Staging models
+  reading their own source are exempt; the exemption is structural (the model
+  is downstream of the source and depends on it directly), not name-based.
+- `FINANCE_TAG_UNVALIDATED` — a referenced relation is tagged `finance` or
+  `pii` and its last run was not `success` (or it has no run result). The CLI
+  prints `This query touches a model tagged finance - validation required
+  before export` under the finding.
+
+```bash
+dbt run && dbt docs generate
+dbt-safesql                              # finds ./target automatically
+dbt-safesql --target-dir build/target    # elsewhere
+safesql-sql --target-dir target models/marts/fct_revenue.sql   # file-scoped
+```
+
+Without a manifest the previous behaviour is unchanged (schema.yml DDL). The
+request body is capped at 25 MB; a very large manifest can be trimmed with
+`dbt compile --select <models>`.
+
 ## Integration tests
 
 `integration_tests/` is a minimal dbt project with two deliberately broken
@@ -204,3 +235,4 @@ invalid SQL.
 | `SAFESQL_API_URL` | Override the endpoint, e.g. `http://localhost:8788/api/validate` |
 | `SAFESQL_THRESHOLD` | Default for `--threshold` |
 | `SAFESQL_WARN_ONLY` | `1`/`true`/`yes` to default `--warn-only` on |
+| `SAFESQL_DBT_TARGET` | Default for `--target-dir` |

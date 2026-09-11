@@ -31,10 +31,10 @@ export function formatIssueMessage(issue: Issue): string {
 
 /**
  * Status bar label, e.g. "SafeSQL: 25 CRITICAL" — or, on a gated free key,
- * "SafeSQL: 25 CRITICAL (12/33)" so the narrowed coverage is visible at a
+ * "SafeSQL: 25 CRITICAL (12/35)" so the narrowed coverage is visible at a
  * glance rather than only on hover. Paid keys keep the original label.
  */
-export function statusBarText(result: ValidationResult, totalDetectors = 33): string {
+export function statusBarText(result: ValidationResult, totalDetectors = 35): string {
   const base = `SafeSQL: ${result.score} ${result.verdict}`;
   const run = result.detectorsRun?.length;
   if (run !== undefined && run < totalDetectors) return `${base} (${run}/${totalDetectors})`;

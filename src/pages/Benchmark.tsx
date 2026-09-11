@@ -11,6 +11,8 @@ import { SiteNav } from '../components/SiteNav';
 
 const RUN_DATE = 'August 2026';
 const VERSION = 'v0.9.1';
+// The detector set the benchmark was RUN on. v0.10.0 ships 35; do not bump
+// this until the benchmark is re-run against the new set.
 const DETECTOR_COUNT = 33;
 
 const REPO = 'https://github.com/mpingosystems/safesql';
@@ -100,7 +102,7 @@ python benchmark/run_benchmark.py --dataset bird
 
 # Spider and BIRD datasets download separately — see benchmark/README
 # To run against the hosted API instead of the local engine, add:
-#   --api-key $SAFESQL_API_KEY   (Pro or above; a free key runs only 12 of 33)`;
+#   --api-key $SAFESQL_API_KEY   (Pro or above; a free key runs only 12 of 35)`;
 
 const card: React.CSSProperties = {
   background: '#18181b',
@@ -345,7 +347,8 @@ export function BenchmarkPage() {
           </p>
           <p style={{ color: '#71717a', fontSize: 12 }}>
             Benchmark run: {RUN_DATE} · SafeSQL Pro {VERSION} · {DETECTOR_COUNT} detectors · Spider dev
-            (1,034 queries) and BIRD dev (1,534 queries) both included.
+            (1,034 queries) and BIRD dev (1,534 queries) both included. Benchmark run on 33-detector
+            version. Updated benchmark with 35 detectors in progress.
           </p>
         </div>
       </div>

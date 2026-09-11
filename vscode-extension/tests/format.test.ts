@@ -79,11 +79,11 @@ describe('status bar', () => {
   };
 
   it('appends the detector count when the tier ran a narrowed set', () => {
-    expect(statusBarText(freeResult)).toBe('SafeSQL: 25 CRITICAL (12/33)');
+    expect(statusBarText(freeResult)).toBe('SafeSQL: 25 CRITICAL (12/35)');
   });
 
   it('leaves the label untouched when all detectors ran', () => {
-    const pro = { ...result, tier: 'pro', detectorsRun: Array.from({ length: 33 }, (_, i) => `D${i}`) };
+    const pro = { ...result, tier: 'pro', detectorsRun: Array.from({ length: 35 }, (_, i) => `D${i}`) };
     expect(statusBarText(pro)).toBe('SafeSQL: 25 CRITICAL');
   });
 

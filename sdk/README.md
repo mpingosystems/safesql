@@ -7,7 +7,7 @@ semantic SQL validation.
 > numbers that drive real decisions.
 
 The SDK is a thin, dependency-free wrapper around the SafeSQL Pro REST API
-(`POST /api/validate`). It runs the same 33-detector engine that powers the web
+(`POST /api/validate`). It runs the same 35-detector engine that powers the web
 editor, the CLI, the GitHub Action and the dbt integration.
 
 ## Install
@@ -73,6 +73,36 @@ if (!result.valid) {
 }
 ```
 
+### 4. With dbt artifacts
+
+Pass parsed `target/manifest.json` (required), `catalog.json` and
+`run_results.json` (optional). The schema is then derived from the artifacts —
+complete column lists, warehouse types, PK/FK/nullable from the project's own
+`unique` / `not_null` / `relationships` tests — and two dbt-aware detectors run:
+`UNAPPROVED_SOURCE` (a raw source queried while a trusted mart exists) and
+`FINANCE_TAG_UNVALIDATED` (a `finance` / `pii`-tagged relation whose last run
+did not succeed). `currentModel` lets a staging model read its own raw source
+without a finding. The request body is capped at 25 MB.
+
+```typescript
+import { readFileSync } from 'node:fs';
+
+const read = (f: string) => JSON.parse(readFileSync(`target/${f}`, 'utf8'));
+
+const result = await client.validate({
+  sql,
+  dbt: {
+    manifest: read('manifest.json'),
+    catalog: read('catalog.json'),       // optional
+    runResults: read('run_results.json'), // optional
+    currentModel: 'stg_orders',           // optional — the model this SQL is
+  },
+});
+
+console.log(result.dbtContext);
+// { models: 4, sources: 2, sensitiveTagged: 1, artifacts: { catalog: true, runResults: true }, warnings: [] }
+```
+
 ## API
 
 ### `new SafeSQLClient(options)`
@@ -92,6 +122,7 @@ if (!result.valid) {
 | `dialect`   | `'postgresql' \| 'mysql' \| 'bigquery' \| 'snowflake'`      | `'postgresql'` |
 | `threshold` | `number` (0–100)                                            | `70`           |
 | `signal`    | `AbortSignal`                                               | —              |
+| `dbt`       | `DbtArtifacts` — `{ manifest, catalog?, runResults?, sensitiveTags?, currentModel? }` | — |
 
 Returns `Promise<ValidationResult>`:
 
@@ -102,6 +133,10 @@ interface ValidationResult {
   verdict: 'CLEAN' | 'REVIEW' | 'RISKY' | 'CRITICAL';
   issues: Issue[];       // errors first, then warnings, then suggestions
   executionTime: number; // server-side detection time, ms
+  tier?: string;         // plan the API ran under; 'free' runs 12 of 35 detectors
+  detectorsRun?: string[];
+  upgradePrompt?: string;
+  dbtContext?: DbtContextSummary; // only when `dbt` was sent — counts, never the artifacts
 }
 
 interface Issue {

@@ -1,6 +1,6 @@
 # SafeSQL GitHub Action
 
-Block PRs containing semantically unsafe SQL. Same 33 detectors as the web
+Block PRs containing semantically unsafe SQL. Same 35 detectors as the web
 editor — runs entirely in CI, no network call required.
 
 ## Usage

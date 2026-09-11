@@ -5,7 +5,7 @@ import { admin, callerId, jsonRes, preflight, seatUsage } from './_shared';
 //
 // Also grants the seat: the joining member's users.plan is raised to the team's
 // plan. Without that step an invited member is seated but still on `free`,
-// running 12 of 33 detectors — which is what "5 seats" is supposed to buy.
+// running 12 of 35 detectors — which is what "5 seats" is supposed to buy.
 
 export const onRequestOptions = preflight;
 

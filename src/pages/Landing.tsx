@@ -252,7 +252,7 @@ export function LandingPage() {
         <h2 style={h2}>How it works</h2>
         <div style={cardGrid}>
           <StepCard num={1} title="Paste SQL + schema (or connect your database)" body="Paste your query and DDL — or connect directly to your PostgreSQL database. SafeSQL Pro parses both into an AST instantly." />
-          <StepCard num={2} title="Detect logic errors, not just syntax" body="33 semantic detectors catch what linters miss: JOIN multiplication, fan-out aggregates, hallucinated AI columns, LEFT JOIN WHERE traps, missing time filters, and more. Deterministic AST detection — rules fire or they don't, never a guess. See our public benchmark." />
+          <StepCard num={2} title="Detect logic errors, not just syntax" body="35 semantic detectors catch what linters miss: JOIN multiplication, fan-out aggregates, hallucinated AI columns, LEFT JOIN WHERE traps, missing time filters, and more. Deterministic AST detection — rules fire or they don't, never a guess. See our public benchmark." />
           <StepCard num={3} title="Prove it with synthetic data" body="Not just warnings — proof. SafeSQL Pro runs your query on RealityDB synthetic data and shows actual row counts, inflated aggregates, and rejected columns before a single production row is touched." />
         </div>
         <p style={{ textAlign: 'center', marginTop: 18, fontSize: 13.5, color: '#a1a1aa' }}>
@@ -320,7 +320,7 @@ function StepCard({ num, title, body }: { num: number; title: string; body: stri
 // Precision is attributed to the labelled suites only — Spider and BIRD label
 // no defects, so they cannot contribute a true or false positive.
 const BENCH_STATS: Array<{ value: string; label: string }> = [
-  { value: '33', label: 'detectors — deterministic AST, no ML' },
+  { value: '35', label: 'detectors — deterministic AST, no ML' },
   { value: '5', label: 'surfaces — CLI, VS Code, GitHub Action, dbt, pre-commit' },
   { value: '0.70 ms', label: 'median validation time across 2,654 benchmark queries' },
   { value: '76.4%', label: 'precision on 86 labelled queries; 2,654 total in the benchmark' },
@@ -366,7 +366,7 @@ const TIERS = [
   {
     icon: '⇄',
     kicker: 'Team (Pro + Team)',
-    body: 'Enforce SQL quality across your repository. All 33 detectors. CI enforcement. Retained validation history.',
+    body: 'Enforce SQL quality across your repository. All 35 detectors. CI enforcement. Retained validation history.',
     example: 'Enforced: 0 broken SQL merged this sprint',
   },
   {
@@ -418,7 +418,7 @@ const COMPARE_COLS = ['SQLFluff', 'SQLSure', 'Soda / Monte Carlo', 'SafeSQL Pro'
 const COMPARE_ROWS: Array<[string, string, string, string, string]> = [
   ['When it runs', 'Before execution', 'Before execution', 'After data lands', 'Before execution'],
   ['What it checks', 'Syntax + style', 'Query semantics', 'Data values & metrics', 'Query semantics'],
-  ['Detector breadth', 'Style rules', '9 rules', 'Metric monitors', '33 detectors'],
+  ['Detector breadth', 'Style rules', '9 rules', 'Metric monitors', '35 detectors'],
   ['Fan-out aggregate detection', '✗', '✓', '✗', '✓'],
   ['dbt integration', '✓', '✓', '✓', '✓'],
   ['CI enforcement', '✓', '✓', '✓', '✓'],
@@ -481,7 +481,7 @@ function ComparisonTable() {
       </div>
       <p style={{ color: '#71717a', fontSize: 12, lineHeight: 1.7, marginTop: 10 }}>
         SQLSure detects fan-out aggregates and ships dbt and CI integrations — we do not claim
-        otherwise. Our differentiators are detector breadth (33 vs 9), executable synthetic proof of
+        otherwise. Our differentiators are detector breadth (35 vs 9), executable synthetic proof of
         row inflation, and a hosted, retained audit trail with approvals. Every SafeSQL Pro entry is
         measured on our{' '}
         <a href="#/benchmark" style={{ color: '#a78bfa' }}>
@@ -554,7 +554,7 @@ export function PricingSection() {
         }}
       >
         <strong style={{ color: '#e4e4e7' }}>Start free.</strong> 12 core detectors, CLI and
-        pre-commit — no account required. VS Code and CI need a free API key. Upgrade for all 33
+        pre-commit — no account required. VS Code and CI need a free API key. Upgrade for all 35
         detectors, CI enforcement, and team controls.
       </p>
 

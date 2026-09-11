@@ -11,14 +11,14 @@ import { looksLikeDbtManifest, type DbtArtifactInput } from '../../src/services/
 import { hashApiKey, PLAN_API_LIMITS } from '../../src/services/apiKeys';
 import type { PlanTier } from '../../src/config/detectorTiers';
 
-// Sprint 7 Part 3 — REST API. POST /api/validate runs the same 33-detector
+// Sprint 7 Part 3 — REST API. POST /api/validate runs the same 35-detector
 // engine server-side, behind Bearer API-key auth + per-plan monthly rate limits.
 //
 // The core (handleValidate) takes Web-standard Request/Response and injectable
 // deps, so it's unit-testable without a live Supabase. onRequestPost wires the
 // Supabase service-role-backed deps for the Workers runtime.
 
-const DETECTOR_VERSION = '0.5.0';
+const DETECTOR_VERSION = '0.10.0';
 
 // Sprint 8 (dbt) — the request may carry parsed dbt artifacts. A real
 // manifest.json is 1–20 MB, so the body cap is generous but finite. Enforced
@@ -164,7 +164,7 @@ export const onRequestPost = async (context: { request: Request; env: Env }): Pr
       // nothing in the Stripe webhook touches it (webhook.ts patches
       // users.plan only). Trusting it would mean a customer who upgrades keeps
       // the 12-detector free gate and the free rate limit until they rotate
-      // their key, and a customer who cancels keeps all 33 forever. users.plan
+      // their key, and a customer who cancels keeps all 35 forever. users.plan
       // is the live value the billing webhook maintains, so join through to it.
       const { data } = await supabase
         .from('api_keys')

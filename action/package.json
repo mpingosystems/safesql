@@ -1,6 +1,6 @@
 {
   "name": "safesql-action",
-  "version": "0.4.0",
+  "version": "0.10.0",
   "private": true,
   "description": "SafeSQL GitHub Action — validate SQL files in CI",
   "scripts": {

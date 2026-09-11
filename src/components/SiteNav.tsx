@@ -62,7 +62,7 @@ export function SiteNav({ current }: { current: NavRoute }) {
         >
           SafeSQL Pro
         </a>
-        <span style={{ fontSize: 11, color: '#52525b' }}>v0.9.1</span>
+        <span style={{ fontSize: 11, color: '#52525b' }}>v0.10.0</span>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>

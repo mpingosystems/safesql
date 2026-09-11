@@ -4,6 +4,7 @@ import { validateSQL } from '../services/sqlValidator';
 import { apiUrl } from '../config/api';
 import type { SuggestedRule } from '../services/ruleSuggestion';
 import type { CustomRule, CustomRuleType } from '../types/validation';
+import { TOTAL_DETECTORS } from '../config/detectorTiers';
 
 // Sprint 8 Part 5 — custom rules authoring at /team/rules (Business tier).
 // v1: build a rule + test it live against a sample query (the engine runs
@@ -98,7 +99,7 @@ export function CustomRulesPage() {
   return (
     <Shell>
       <h1 style={{ fontSize: 22 }}>Custom Rules</h1>
-      <p style={{ color: '#a1a1aa', fontSize: 13 }}>Encode your team's SQL policy on top of the 33 semantic detectors.</p>
+      <p style={{ color: '#a1a1aa', fontSize: 13 }}>Encode your team's SQL policy on top of the {TOTAL_DETECTORS} semantic detectors.</p>
 
       <h2 style={{ fontSize: 14, color: '#a1a1aa', marginTop: 16 }}>Describe a rule</h2>
       <div style={card}>

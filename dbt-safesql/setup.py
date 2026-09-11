@@ -16,7 +16,7 @@ with open(os.path.join(HERE, "README.md"), "r", encoding="utf-8") as fh:
 
 setup(
     name="dbt-safesql",
-    version="0.2.1",
+    version="0.3.0",
     description="Validate dbt SQL models with SafeSQL Pro before they execute",
     long_description=LONG_DESCRIPTION,
     long_description_content_type="text/markdown",

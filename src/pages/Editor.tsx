@@ -219,7 +219,7 @@ export function EditorPage() {
   const { team } = useTeam();
   const overLimit = isOverValidationLimit(appUser);
   const isPro = !!appUser && appUser.plan !== 'free';
-  // Sprint 5C — free users run the 12 core detectors; Pro+ runs all 33. Signed-out
+  // Sprint 5C — free users run the 12 core detectors; Pro+ runs all 35. Signed-out
   // visitors are treated as free.
   const tier: PlanTier = isPro ? (appUser!.plan as PlanTier) : 'free';
 

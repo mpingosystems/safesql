@@ -177,7 +177,7 @@ Fix: pre-aggregate payments before joining.`,
       {
         title: 'Give it your schema',
         body:
-          'Ten of the 33 detectors are schema-aware — hallucinated columns, nullable-FK join drops, integer division, NOT IN over nullables. Without DDL they cannot fire, and their silence looks like a clean bill of health. Paste your CREATE TABLE statements, or connect PostgreSQL, BigQuery or Snowflake in Settings.',
+          'Ten of the 35 detectors are schema-aware — hallucinated columns, nullable-FK join drops, integer division, NOT IN over nullables. Without DDL they cannot fire, and their silence looks like a clean bill of health. Paste your CREATE TABLE statements, or connect PostgreSQL, BigQuery or Snowflake in Settings.',
       },
       {
         title: 'Read the synthetic proof, not just the warning',
@@ -187,7 +187,7 @@ Fix: pre-aggregate payments before joining.`,
       {
         title: 'Move it into your terminal',
         body:
-          'Same 33 detectors, no network call. Exit code 1 on an error, so it composes with anything. Add --fail-on-warnings when you want the stricter gate.',
+          'Same 35 detectors, no network call. Exit code 1 on an error, so it composes with anything. Add --fail-on-warnings when you want the stricter gate.',
         snippets: [
           {
             lang: 'bash',
@@ -233,7 +233,7 @@ npx safesql validate models/revenue.sql --json`,
       {
         title: 'Make the check a required status',
         body:
-          'The GitHub Action runs the same 33 detectors on the SQL files changed in a pull request, entirely inside CI with no network call. It exits nonzero when a file has an error, so a failing check blocks the merge.',
+          'The GitHub Action runs the same 35 detectors on the SQL files changed in a pull request, entirely inside CI with no network call. It exits nonzero when a file has an error, so a failing check blocks the merge.',
         snippets: [
           {
             lang: 'yaml',
@@ -331,7 +331,7 @@ npx safesql validate query.sql --fail-on-warnings`,
       {
         title: 'Push it left once it is trusted',
         body:
-          'CI tells you a PR is wrong. The pre-commit hook and the VS Code extension tell an engineer before the PR exists. Moving the same 33 detectors earlier is what turns a gate people work around into one they stop hitting.',
+          'CI tells you a PR is wrong. The pre-commit hook and the VS Code extension tell an engineer before the PR exists. Moving the same 35 detectors earlier is what turns a gate people work around into one they stop hitting.',
       },
       {
         title: 'Check our numbers before you trust them',
@@ -365,7 +365,7 @@ export function HowToPage() {
           matches your week — every command below is copy-pasteable as written.
         </p>
         <p style={{ color: '#71717a', fontSize: 13, lineHeight: 1.6, marginBottom: 26 }}>
-          Same engine everywhere: 33 detectors, no ML in the detection layer, ~0.7 ms median. Results
+          Same engine everywhere: 35 detectors, no ML in the detection layer, ~0.7 ms median. Results
           are measured on the{' '}
           <a href="#/benchmark" style={{ color: '#a78bfa' }}>
             public benchmark

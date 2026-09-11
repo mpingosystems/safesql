@@ -1,7 +1,7 @@
 # SafeSQL CLI
 
 Pre-execution semantic SQL validation in your terminal. Thin wrapper around the
-SafeSQL engine (`src/services/`) — same 33 detectors as the web editor.
+SafeSQL engine (`src/services/`) — same 35 detectors as the web editor.
 
 ## Install / build
 

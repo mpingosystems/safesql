@@ -49,6 +49,7 @@
           },
           "400": { "description": "Invalid request", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "sql field is required" } } } },
           "401": { "description": "Missing or invalid API key", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Invalid API key. Get yours at safesqlpro.dev/settings" } } } },
+          "413": { "description": "Request body exceeds the 25 MB limit (dbt artifacts too large)", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Request body exceeds 25 MB limit" } } } },
           "429": { "description": "Rate limit exceeded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" }, "example": { "error": "Rate limit exceeded. Upgrade at safesqlpro.dev/pricing" } } } },
           "500": { "description": "Server error", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
         }
@@ -69,7 +70,19 @@
           "ddl": { "type": "string", "description": "Optional CREATE TABLE DDL to enable schema-aware detectors." },
           "dialect": { "type": "string", "enum": ["postgresql", "mysql", "bigquery", "snowflake"], "default": "postgresql" },
           "source": { "type": "string", "enum": ["cursor", "copilot", "chatgpt", "manual", "unknown"], "description": "Where the SQL came from (analytics tagging)." },
-          "include_ai_explanations": { "type": "boolean", "default": false }
+          "include_ai_explanations": { "type": "boolean", "default": false },
+          "dbt": {
+            "type": "object",
+            "description": "Optional dbt artifacts. When present, the schema is derived from catalog.json + manifest.json (PK/FK/nullable from unique / not_null / relationships tests) and the UNAPPROVED_SOURCE and FINANCE_TAG_UNVALIDATED detectors run. `ddl`, if also supplied, wins per table. The total request body is capped at 25 MB (HTTP 413 above that).",
+            "required": ["manifest"],
+            "properties": {
+              "manifest": { "type": "object", "description": "Parsed target/manifest.json (dbt manifest schema v10-v12). Required." },
+              "catalog": { "type": "object", "description": "Parsed target/catalog.json from `dbt docs generate`. Optional; supplies complete column lists and warehouse types." },
+              "runResults": { "type": "object", "description": "Parsed target/run_results.json. Optional; supplies the last run status per model." },
+              "sensitiveTags": { "type": "array", "items": { "type": "string" }, "default": ["finance", "pii"], "description": "Tags that make a relation sensitive for FINANCE_TAG_UNVALIDATED." },
+              "currentModel": { "type": "string", "description": "dbt name of the model whose SQL is being validated. Lets a staging model read its own raw source without an UNAPPROVED_SOURCE finding." }
+            }
+          }
         }
       },
       "Issue": {
@@ -94,7 +107,18 @@
           "warnings": { "type": "array", "items": { "$ref": "#/components/schemas/Issue" } },
           "suggestions": { "type": "array", "items": { "$ref": "#/components/schemas/Issue" } },
           "processingMs": { "type": "number" },
-          "detectorVersion": { "type": "string" }
+          "detectorVersion": { "type": "string" },
+          "dbtContext": {
+            "type": "object",
+            "description": "Present only when `dbt` was supplied. Provenance of the loaded context, never the artifacts themselves.",
+            "properties": {
+              "models": { "type": "integer" },
+              "sources": { "type": "integer" },
+              "sensitiveTagged": { "type": "integer", "description": "Relations carrying any configured sensitive tag." },
+              "artifacts": { "type": "object", "properties": { "catalog": { "type": "boolean" }, "runResults": { "type": "boolean" } } },
+              "warnings": { "type": "array", "items": { "type": "string" }, "description": "Non-fatal artifact problems (unknown schema version, orphan catalog node)." }
+            }
+          }
         }
       },
       "Error": { "type": "object", "properties": { "error": { "type": "string" } } }

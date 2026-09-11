@@ -1,6 +1,13 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Env } from '../_shared';
-import { validateSqlSource, type CliDialect } from '../../src/services/fileValidation';
+import {
+  prepareDbtContext,
+  summarizeDbtContext,
+  validateSqlSource,
+  validateSqlWithDbt,
+  type CliDialect,
+} from '../../src/services/fileValidation';
+import { looksLikeDbtManifest, type DbtArtifactInput } from '../../src/services/dbtArtifacts';
 import { hashApiKey, PLAN_API_LIMITS } from '../../src/services/apiKeys';
 import type { PlanTier } from '../../src/config/detectorTiers';
 
@@ -12,6 +19,12 @@ import type { PlanTier } from '../../src/config/detectorTiers';
 // Supabase service-role-backed deps for the Workers runtime.
 
 const DETECTOR_VERSION = '0.5.0';
+
+// Sprint 8 (dbt) — the request may carry parsed dbt artifacts. A real
+// manifest.json is 1–20 MB, so the body cap is generous but finite. Enforced
+// on Content-Length when present AND on the bytes actually read, because a
+// chunked body carries no Content-Length.
+export const MAX_BODY_BYTES = 25 * 1024 * 1024;
 
 // Plans that unlock the full detector set. Anything else — including a missing
 // or unrecognised plan string — is treated as free.
@@ -49,10 +62,28 @@ function bearerToken(request: Request): string | null {
   return /^bearer\s+/i.test(auth) ? auth.replace(/^bearer\s+/i, '').trim() : null;
 }
 
+interface DbtBody {
+  manifest?: unknown;
+  catalog?: unknown;
+  runResults?: unknown;
+  sensitiveTags?: unknown;
+  currentModel?: unknown;
+}
+
 export async function handleValidate(request: Request, deps: ValidateDeps): Promise<Response> {
-  let body: { sql?: unknown; ddl?: unknown; dialect?: unknown };
+  const declared = Number(request.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    return jsonRes({ error: 'Request body exceeds 25 MB limit' }, 413);
+  }
+
+  let body: { sql?: unknown; ddl?: unknown; dialect?: unknown; dbt?: DbtBody };
   try {
-    body = (await request.json()) as typeof body;
+    const text = await request.text();
+    // Byte length, not string length: a UTF-8 body can be up to 4× its char count.
+    if (new TextEncoder().encode(text).byteLength > MAX_BODY_BYTES) {
+      return jsonRes({ error: 'Request body exceeds 25 MB limit' }, 413);
+    }
+    body = JSON.parse(text) as typeof body;
   } catch {
     return jsonRes({ error: 'Invalid JSON body' }, 400);
   }
@@ -75,8 +106,43 @@ export async function handleValidate(request: Request, deps: ValidateDeps): Prom
   const dialect = (typeof body.dialect === 'string' ? body.dialect : 'postgresql') as CliDialect;
   // Sprint 5C — the caller's plan decides the detector set. Anything that isn't
   // a recognised paid plan falls back to 'free', so an unknown/blank plan
-  // narrows the run rather than silently unlocking all 33.
+  // narrows the run rather than silently unlocking all 35.
   const tier: PlanTier = PAID_PLANS.has(auth.plan) ? (auth.plan as PlanTier) : 'free';
+
+  // Sprint 8 (dbt) — optional artifacts. Validated for shape before parsing so
+  // a wrong payload gets a readable 400, never a 500 from the parser.
+  if (body.dbt !== undefined) {
+    const d = body.dbt && typeof body.dbt === 'object' ? body.dbt : undefined;
+    const manifest = d?.manifest;
+    if (!d || !looksLikeDbtManifest(manifest)) {
+      return jsonRes({ error: 'dbt.manifest must be a parsed dbt manifest.json (an object with a `nodes` map)' }, 400);
+    }
+    const artifacts: DbtArtifactInput = {
+      manifest,
+      ...(d.catalog && typeof d.catalog === 'object' ? { catalog: d.catalog as DbtArtifactInput['catalog'] } : {}),
+      ...(d.runResults && typeof d.runResults === 'object'
+        ? { runResults: d.runResults as DbtArtifactInput['runResults'] }
+        : {}),
+      ...(Array.isArray(d.sensitiveTags) && d.sensitiveTags.every((t) => typeof t === 'string')
+        ? { sensitiveTags: d.sensitiveTags as string[] }
+        : {}),
+    };
+    const dbt = prepareDbtContext(artifacts);
+    const currentModel = typeof d.currentModel === 'string' && d.currentModel ? d.currentModel : undefined;
+    const report = validateSqlWithDbt(body.sql, dbt, ddl, dialect, tier, currentModel);
+    return jsonRes(
+      {
+        ...report,
+        tier,
+        detectorVersion: DETECTOR_VERSION,
+        // Provenance only — never the full context. Lets a client tell "no
+        // finding" from "no context loaded".
+        dbtContext: { ...summarizeDbtContext(dbt.context), warnings: dbt.warnings },
+      },
+      200,
+    );
+  }
+
   const report = validateSqlSource(body.sql, ddl, dialect, tier);
   return jsonRes({ ...report, tier, detectorVersion: DETECTOR_VERSION }, 200);
 }

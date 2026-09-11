@@ -23,6 +23,9 @@ inputs:
   schema_file:
     description: "Path to DDL schema file (optional)"
     required: false
+  dbt_target:
+    description: "Path to dbt target directory containing manifest.json (catalog.json and run_results.json used when present)"
+    required: false
   dialect:
     description: "SQL dialect: postgresql | mysql | bigquery | snowflake"
     required: false

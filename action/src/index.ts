@@ -4,12 +4,18 @@ import * as glob from '@actions/glob';
 import * as github from '@actions/github';
 import {
   anyFailing,
+  dbtContextBanner,
   exitCodeFor,
+  modelNameFromFilename,
+  prepareDbtContext,
   summaryTable,
   validateSqlSource,
+  validateSqlWithDbt,
   type CliDialect,
+  type DbtRunContext,
   type FileResult,
 } from '../../src/services/fileValidation';
+import { readDbtTarget } from '../../cli/dbtTarget';
 import {
   buildReviewBody,
   parseAddedLines,
@@ -26,6 +32,24 @@ import type { ValidationIssue } from '../../src/types/validation';
 //   pr-review            — validate only the SQL files changed in the PR and
 //                          post inline review comments on the diff
 
+// Prepared once per run when `dbt_target` is set; undefined otherwise.
+function loadDbtContext(): DbtRunContext | undefined {
+  const dir = core.getInput('dbt_target');
+  if (!dir) return undefined;
+  const dbt = prepareDbtContext(readDbtTarget(dir, 'dbt_target'));
+  for (const w of dbt.warnings) core.warning(`SafeSQL dbt: ${w}`);
+  core.info(dbtContextBanner(dbt.context));
+  return dbt;
+}
+
+// One validation call that picks the dbt path when context is loaded. The
+// model name comes from the file's basename (dbt's rule) and is only used when
+// the manifest knows it.
+function validateFile(sql: string, filename: string, schemaSql: string | undefined, dialect: CliDialect, dbt?: DbtRunContext) {
+  if (!dbt) return validateSqlSource(sql, schemaSql, dialect);
+  return validateSqlWithDbt(sql, dbt, schemaSql, dialect, undefined, modelNameFromFilename(filename, dbt.context));
+}
+
 async function runValidate(): Promise<void> {
   const pattern = core.getInput('sql_files') || '**/*.sql';
   const schemaFile = core.getInput('schema_file');
@@ -33,6 +57,7 @@ async function runValidate(): Promise<void> {
   const failOnWarnings = core.getInput('fail_on_warnings') === 'true';
 
   const schemaSql = schemaFile ? readFileSync(schemaFile, 'utf8') : undefined;
+  const dbt = loadDbtContext();
 
   const globber = await glob.create(pattern);
   const files = await globber.glob();
@@ -41,15 +66,14 @@ async function runValidate(): Promise<void> {
   let totalIssues = 0;
   for (const file of files) {
     const sql = readFileSync(file, 'utf8');
-    const report = validateSqlSource(sql, schemaSql, dialect);
+    const report = validateFile(sql, file, schemaSql, dialect, dbt);
     results.push({ filename: file, report });
     totalIssues += report.errors.length + report.warnings.length;
   }
 
-  await core.summary
-    .addHeading('SafeSQL validation')
-    .addRaw('\n' + summaryTable(results) + '\n')
-    .write();
+  const summary = core.summary.addHeading('SafeSQL validation');
+  if (dbt) summary.addRaw('\n' + dbtContextBanner(dbt.context) + '\n\n');
+  await summary.addRaw('\n' + summaryTable(results) + '\n').write();
 
   core.setOutput('issues_found', String(totalIssues));
   core.setOutput('files_checked', String(files.length));
@@ -82,6 +106,7 @@ async function runPrReview(): Promise<void> {
   const blocking = (core.getInput('comment_mode') || 'block') !== 'warn';
 
   const schemaSql = schemaFile ? readFileSync(schemaFile, 'utf8') : undefined;
+  const dbt = loadDbtContext();
   const octokit = github.getOctokit(token);
   const { owner, repo } = github.context.repo;
 
@@ -116,7 +141,7 @@ async function runPrReview(): Promise<void> {
       core.warning(`SafeSQL: could not read ${file.filename} from the workspace — skipped.`);
       continue;
     }
-    const report = validateSqlSource(sql, schemaSql, dialect);
+    const report = validateFile(sql, file.filename, schemaSql, dialect, dbt);
     results.push({ filename: file.filename, report });
 
     const issueCount = report.errors.length + report.warnings.length;

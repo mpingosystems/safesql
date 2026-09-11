@@ -65467,9 +65467,69 @@ function unwrapName(node) {
         return n.table;
     return null;
 }
+/**
+ * Remove SQL comments from a DDL string, leaving everything else intact.
+ *
+ * parseDDL keeps only `;`-separated chunks that START WITH "CREATE TABLE", so a
+ * single `-- comment` before a statement pushed the keyword off the front of the
+ * chunk and the whole table was dropped — silently, producing false
+ * HALLUCINATED_TABLE errors for every table after the first comment.
+ *
+ * String literals and quoted identifiers are preserved verbatim: a `--` or `/*`
+ * inside '...', "..." or `...` is data, not a comment. Doubled quotes ('') are
+ * handled as the standard SQL escape. Block comments collapse to a single space
+ * so they cannot fuse the tokens on either side.
+ */
+function stripSqlComments(sql) {
+    let out = '';
+    let quote = null;
+    let i = 0;
+    while (i < sql.length) {
+        const c = sql[i];
+        const next = sql[i + 1];
+        if (quote) {
+            out += c;
+            if (c === quote) {
+                if (next === quote) {
+                    // Escaped quote ('' or "") — consume both, stay inside the literal.
+                    out += next;
+                    i += 2;
+                    continue;
+                }
+                quote = null;
+            }
+            i += 1;
+            continue;
+        }
+        if (c === "'" || c === '"' || c === '`') {
+            quote = c;
+            out += c;
+            i += 1;
+            continue;
+        }
+        if (c === '-' && next === '-') {
+            // Line comment: skip to the newline, which the next iteration copies so
+            // line structure (and any statement on the following line) survives.
+            while (i < sql.length && sql[i] !== '\n')
+                i += 1;
+            continue;
+        }
+        if (c === '/' && next === '*') {
+            i += 2;
+            while (i < sql.length && !(sql[i] === '*' && sql[i + 1] === '/'))
+                i += 1;
+            i += 2; // past the closing */ (past end if unterminated, which ends the loop)
+            out += ' ';
+            continue;
+        }
+        out += c;
+        i += 1;
+    }
+    return out;
+}
 function parseDDL(ddl, dialect = 'postgresql') {
     const tables = [];
-    const createStatements = ddl
+    const createStatements = stripSqlComments(ddl)
         .split(/;\s*/)
         .filter((s) => s.trim().toUpperCase().startsWith('CREATE TABLE'));
     for (const stmt of createStatements) {
@@ -65731,7 +65791,88 @@ function ruleFires(rule, sql, ast, stmts, tables, schema) {
     }
 }
 
+;// CONCATENATED MODULE: ../src/config/detectorTiers.ts
+// The 12 free core detectors. Each line records the Sprint 5C prompt name it
+// satisfies, so the plan doc and the code can be reconciled later.
+const FREE_DETECTOR_SLUGS = [
+    'CARTESIAN_JOIN', // prompt: CARTESIAN_PRODUCT + MISSING_JOIN_CONDITION (both describe this)
+    'CROSS_JOIN_RISK', // prompt: CROSS_JOIN_WITHOUT_LIMIT
+    'JOIN_MULTIPLICATION', // prompt: FANOUT_JOIN — the basic row-multiplication warning.
+    //   AGGREGATE_OVER_FANOUT_JOIN (the flagship) stays Pro, per the plan.
+    'INNER_JOIN_NULL_EXCLUSION', // prompt: NULLABLE_JOIN_KEY
+    'AMBIGUOUS_COLUMN', // prompt: AMBIGUOUS_COLUMN_REFERENCE
+    'SELECT_STAR_EXPENSIVE', // prompt: UNQUALIFIED_SELECT_STAR
+    'MISSING_WHERE_DESTRUCTIVE', // prompt: MISSING_WHERE_CLAUSE (fires on UPDATE/DELETE, not SELECT)
+    // ── Substitutions for prompt names with no implementation ──────────────────
+    'DESTRUCTIVE_DDL', // replaces IMPLICIT_TYPE_CAST (unimplemented).
+    //   Safety: a free user's DROP must never go unflagged.
+    'DESTRUCTIVE_TRUNCATE', // same rationale as DESTRUCTIVE_DDL.
+    'NULL_EQUALITY_COMPARISON', // replaces DIVISION_BY_ZERO_RISK (unimplemented).
+    //   `col = NULL` is the same class: an obvious, high-trust catch.
+    'INCOMPLETE_GROUP_BY', // replaces DUPLICATE_COLUMN_NAMES (unimplemented).
+    'UNKNOWN_ALIAS', // replaces UNINDEXED_LEADING_WILDCARD (unimplemented, and a
+    //   performance rule rather than a semantic one).
+];
+// All 33 built-in detectors — the Pro+ set. CUSTOM_RULE is excluded on purpose:
+// it is a Business-tier engine driven by caller-supplied rules, not a built-in
+// detector. SYNTAX_ERROR is excluded because it is a parse-failure fallback and
+// is never gated (see ungatedDetectors below).
+const PRO_DETECTOR_SLUGS = [
+    ...FREE_DETECTOR_SLUGS,
+    'AGGREGATE_OVER_FANOUT_JOIN',
+    'MULTIPLE_ONE_TO_MANY_JOINS',
+    'AGGREGATION_GRAIN_MISMATCH',
+    'HALLUCINATED_TABLE',
+    'HALLUCINATED_COLUMN',
+    'LEFT_JOIN_FILTERED_IN_WHERE',
+    'SUSPICIOUS_JOIN_KEY',
+    'SCD_JOIN_WITHOUT_EFFECTIVE_DATE',
+    'NOT_IN_NULLABLE',
+    'AVG_OVER_NULLABLE',
+    'CONTRADICTORY_FILTER',
+    'INTEGER_DIVISION_RISK',
+    'COUNT_PARENT_AFTER_CHILD_JOIN',
+    'COUNT_STAR_VS_COUNT_COL',
+    'HAVING_WITHOUT_GROUP_BY',
+    'MISSING_TIME_FILTER',
+    'DIALECT_MISMATCH',
+    'NON_DETERMINISTIC_WINDOW_ORDER',
+    'WINDOW_MISSING_ORDER',
+    'COALESCE_IN_JOIN_KEY',
+    'IMPLICIT_TIMEZONE',
+    // ── Sprint 8 (dbt manifest context) — Pro; require request.dbtContext ─────
+    'UNAPPROVED_SOURCE',
+    'FINANCE_TAG_UNVALIDATED',
+];
+// Total built-in detector count. Single source of truth for every UI string —
+// import this rather than hardcoding a number, so the count can never drift
+// from the implementation again.
+const TOTAL_DETECTORS = PRO_DETECTOR_SLUGS.length;
+const FREE_DETECTOR_COUNT = FREE_DETECTOR_SLUGS.length;
+// Never gated, on any tier:
+//   SYNTAX_ERROR — a parse failure, not a detection. Gating it would leave a
+//     free user with an unexplained empty report.
+//   CUSTOM_RULE  — only present when a Business caller supplied rules; the tier
+//     check happens at the point the rules are loaded.
+const UNGATED = new Set(['SYNTAX_ERROR', 'CUSTOM_RULE']);
+function getDetectorsForTier(tier) {
+    return tier === 'free' ? FREE_DETECTOR_SLUGS : PRO_DETECTOR_SLUGS;
+}
+// True when `id` is allowed to produce a finding on `tier`.
+function isDetectorEnabled(id, tier) {
+    if (UNGATED.has(id))
+        return true;
+    return getDetectorsForTier(tier).includes(id);
+}
+// The detectors a free tier does NOT run — used to size the upgrade prompt.
+// Deliberately not surfaced per-detector in the UI: the prompt says how many
+// were withheld, never which ones.
+function gatedDetectorCount(tier) {
+    return TOTAL_DETECTORS - getDetectorsForTier(tier).length;
+}
+
 ;// CONCATENATED MODULE: ../src/services/sqlValidator.ts
+
 
 
 
@@ -65820,7 +65961,7 @@ function validateSQL(request) {
     issues.push(...detectCartesianAndCrossJoin(ast));
     issues.push(...detectLeftJoinFilteredInWhere(ast));
     issues.push(...detectSuspiciousJoinKey(ast, request.schema));
-    issues.push(...detectFanOutJoins(ast));
+    issues.push(...detectFanOutJoins(ast, request.schema));
     issues.push(...detectScdJoinWithoutEffectiveDate(ast));
     issues.push(...detectIntegerDivision(ast, request.schema));
     issues.push(...detectCountParentAfterChildJoin(ast));
@@ -65835,26 +65976,49 @@ function validateSQL(request) {
     issues.push(...detectMissingTimeFilterBareScan(ast));
     issues.push(...detectImplicitTimezone(ast));
     issues.push(...detectDialectLimitTop(request.sql, request.dialect));
+    // ── Sprint 8 (dbt): manifest-context detectors — no-ops without request.dbtContext ─
+    issues.push(...detectUnapprovedSource(ast, request.schema, request.dbtContext));
+    issues.push(...detectFinanceTagUnvalidated(ast, request.schema, request.dbtContext));
     // ── Sprint 8: team custom rules (Business tier) — after the built-in detectors ─
     if (request.customRules && request.customRules.length > 0) {
         issues.push(...evaluateCustomRules(request.sql, ast, request.schema, request.customRules));
     }
+    // ── Sprint 5C: free/pro detector gating ────────────────────────────────────
+    // Every detector still RUNS; findings from detectors the tier doesn't include
+    // are dropped here. Running them all costs microseconds and is what lets the
+    // upgrade prompt say something true ("3 findings withheld") instead of
+    // guessing. The score is then calculated only from the findings that survived,
+    // exactly as if the gated detectors had never run.
+    const tier = request.tier ?? 'pro';
+    const detectorsRun = getDetectorsForTier(tier);
+    const withheld = issues.filter((i) => !isDetectorEnabled(i.id, tier));
+    const visible = withheld.length > 0 ? issues.filter((i) => isDetectorEnabled(i.id, tier)) : issues;
     // Issue Object Contract (§10): make sure every finding carries the offending
     // anchor fields + a scoreImpact, deriving them from legacy `metadata`/severity
     // when a detector didn't set them explicitly.
-    for (const issue of issues)
+    for (const issue of visible)
         normalizeIssueContract(issue);
-    const errors = issues.filter((i) => i.severity === 'error');
-    const warnings = issues.filter((i) => i.severity === 'warning');
-    const suggestions = issues.filter((i) => i.severity === 'suggestion');
+    const errors = visible.filter((i) => i.severity === 'error');
+    const warnings = visible.filter((i) => i.severity === 'warning');
+    const suggestions = visible.filter((i) => i.severity === 'suggestion');
     return {
-        riskScore: calculateRiskScore(issues),
+        riskScore: calculateRiskScore(visible),
         executionSafe: errors.length === 0,
         errors,
         warnings,
         suggestions,
         processingMs: performance.now() - start,
         source: request.source,
+        detectorsRun,
+        // Only nudge when findings were genuinely withheld. Never names the gated
+        // detectors — the count is the motivation, per the Sprint 5C spec.
+        ...(withheld.length > 0
+            ? {
+                upgradePrompt: `${withheld.length} additional ${withheld.length === 1 ? 'finding' : 'findings'} ` +
+                    `${withheld.length === 1 ? 'was' : 'were'} detected by Pro-only checks. ` +
+                    `Upgrade to run all ${TOTAL_DETECTORS} detectors.`,
+            }
+            : {}),
     };
 }
 // High-risk warnings land in the 41-69 band; everything else warning-level is a
@@ -65876,6 +66040,9 @@ const HIGH_RISK_WARNINGS = new Set([
     // Sprint 3b additions:
     'COALESCE_IN_JOIN_KEY',
     'WINDOW_MISSING_ORDER',
+    // Sprint 8 (dbt manifest context):
+    'UNAPPROVED_SOURCE',
+    'FINANCE_TAG_UNVALIDATED',
 ]);
 // §11 Score Policy. Tier of the WORST finding sets the band; additional findings
 // of that tier nudge the score down within the band. Fixed queries (fewer/less
@@ -66065,6 +66232,42 @@ function extractAndEqualityConditions(node, out) {
         // Any other operator (OR, IN, BETWEEN, !=, etc.) — stop descent.
     }
 }
+// ── Identifier comparison (case-insensitive) ────────────────────────────────
+// Unquoted SQL identifiers are case-insensitive: PostgreSQL folds them to
+// lower case, so CREATE TABLE t (Name TEXT) creates a column named "name" and
+// both `SELECT Name` and `SELECT name` resolve to it. Comparing raw strings
+// meant a CamelCase schema (SQL Server, Snowflake, most ORM-generated DDL)
+// reported every lower-case reference as hallucinated. Found by the Spider
+// benchmark, where it produced 627 spurious findings.
+//
+// Original casing is preserved everywhere it is shown to a user - only the
+// comparison is normalised.
+function identEq(a, b) {
+    return !!a && !!b && a.toLowerCase() === b.toLowerCase();
+}
+function identSet(names) {
+    const out = new Set();
+    for (const n of names)
+        if (n)
+            out.add(n.toLowerCase());
+    return out;
+}
+function hasIdent(set, name) {
+    return !!name && set.has(name.toLowerCase());
+}
+function findTable(schema, name) {
+    if (!schema || !name)
+        return undefined;
+    return schema.tables.find((t) => identEq(t.name, name));
+}
+function findColumn(table, name) {
+    if (!table || !name)
+        return undefined;
+    return table.columns.find((c) => identEq(c.name, name));
+}
+function hasColumn(table, name) {
+    return !!findColumn(table, name);
+}
 // ── D1: JOIN multiplication (schema optional) ───────────────────────────────
 function detectJoinMultiplication(ast, schema) {
     const issues = [];
@@ -66099,7 +66302,7 @@ function detectJoinMultiplication(ast, schema) {
 function isOneToManyRelationship(joinTableName, schema) {
     if (!joinTableName)
         return true;
-    const t = schema.tables.find((x) => x.name === joinTableName);
+    const t = findTable(schema, joinTableName);
     if (!t)
         return true;
     return t.columns.some((c) => c.isFK);
@@ -66117,7 +66320,7 @@ function detectSelectStar(ast, schema, dialect) {
             continue;
         const tables = (stmt.from || []).map((f) => f.table).filter(Boolean);
         for (const tableName of tables) {
-            const schemaTable = schema?.tables.find((t) => t.name === tableName);
+            const schemaTable = findTable(schema, tableName);
             const isLarge = !!(schemaTable?.estimatedRows && schemaTable.estimatedRows > 1_000_000);
             const lower = tableName.toLowerCase();
             const isColumnar = COLUMNAR_HINTS.some((name) => lower.includes(name));
@@ -66160,7 +66363,7 @@ function detectInnerJoinNullExclusion(ast, schema) {
             continue;
         const innerJoins = (stmt.from || []).filter((f) => f.join === 'INNER JOIN' || f.join === 'JOIN');
         // Build alias → real-table-name lookup from FROM list
-        const aliasMap = new Map();
+        const aliasMap = new Map(); // keys stored lower-cased
         for (const f of stmt.from || []) {
             if (f.table) {
                 if (f.as)
@@ -66176,11 +66379,11 @@ function detectInnerJoinNullExclusion(ast, schema) {
             for (const node of candidates) {
                 const col = getColumnName(node);
                 const tblQualifier = getColumnTable(node);
-                const realTable = tblQualifier ? aliasMap.get(tblQualifier) ?? tblQualifier : join.table;
+                const realTable = tblQualifier ? aliasMap.get(tblQualifier?.toLowerCase()) ?? tblQualifier : join.table;
                 if (!col || !realTable)
                     continue;
-                const schemaTable = schema.tables.find((t) => t.name === realTable);
-                const schemaCol = schemaTable?.columns.find((c) => c.name === col);
+                const schemaTable = findTable(schema, realTable);
+                const schemaCol = findColumn(schemaTable, col);
                 if (schemaCol?.nullable && schemaCol?.isFK) {
                     issues.push({
                         id: 'INNER_JOIN_NULL_EXCLUSION',
@@ -66270,16 +66473,16 @@ function detectHallucinatedTable(ast, schema) {
     if (!schema)
         return [];
     const issues = [];
-    const known = new Set(schema.tables.map((t) => t.name));
+    const known = identSet(schema.tables.map((t) => t.name));
     for (const stmt of asStatements(ast)) {
         if (!stmt)
             continue;
         const local = collectLocalTableNames(stmt);
         const seen = new Set(); // dedupe per statement
         const flag = (name) => {
-            if (!name || seen.has(name) || known.has(name) || local.has(name))
+            if (!name || hasIdent(seen, name) || hasIdent(known, name) || hasIdent(local, name))
                 return;
-            seen.add(name);
+            seen.add(name.toLowerCase());
             const closest = nearestName(name, [...known]);
             issues.push({
                 id: 'HALLUCINATED_TABLE',
@@ -66322,7 +66525,7 @@ function detectHallucinatedColumn(ast, schema) {
     const issues = [];
     const tableByName = new Map();
     for (const t of schema.tables)
-        tableByName.set(t.name, t);
+        tableByName.set(t.name.toLowerCase(), t);
     for (const stmt of asStatements(ast)) {
         if (!stmt)
             continue;
@@ -66333,9 +66536,9 @@ function detectHallucinatedColumn(ast, schema) {
         if (Array.isArray(stmt.from)) {
             for (const f of stmt.from) {
                 if (f && typeof f.table === 'string') {
-                    aliasMap.set(f.table, f.table);
+                    aliasMap.set(f.table.toLowerCase(), f.table);
                     if (typeof f.as === 'string' && f.as)
-                        aliasMap.set(f.as, f.table);
+                        aliasMap.set(f.as.toLowerCase(), f.table);
                 }
             }
         }
@@ -66351,7 +66554,7 @@ function detectHallucinatedColumn(ast, schema) {
             !fromHasSubquery;
         const fromSchemaTables = canResolveBare
             ? stmt.from
-                .map((f) => (typeof f?.table === 'string' ? tableByName.get(f.table) : undefined))
+                .map((f) => (typeof f?.table === 'string' ? tableByName.get(f.table.toLowerCase()) : undefined))
                 .filter(Boolean)
             : [];
         // SELECT-clause output aliases — ORDER BY can legally reference these,
@@ -66372,9 +66575,9 @@ function detectHallucinatedColumn(ast, schema) {
                 // D36: bare unqualified column resolution (single- AND multi-table).
                 if (fromSchemaTables.length === 0)
                     return; // can't resolve (CTE / subquery FROM / unknown tables)
-                if (selectAliases.has(colName))
+                if (hasIdent(identSet(selectAliases), colName))
                     return;
-                const owners = fromSchemaTables.filter((t) => t.columns.some((c) => c.name === colName));
+                const owners = fromSchemaTables.filter((t) => hasColumn(t, colName));
                 // On ≥1 table → resolvable; if on 2+ that's AMBIGUOUS_COLUMN's job (D34),
                 // not a hallucination. Only flag when it exists on NONE of the tables.
                 if (owners.length >= 1)
@@ -66424,14 +66627,14 @@ function detectHallucinatedColumn(ast, schema) {
             // Skip locally-defined names (CTE / subquery alias) — out of D9's scope.
             if (local.has(tableQual))
                 return;
-            const realTable = aliasMap.get(tableQual) ?? tableQual;
+            const realTable = aliasMap.get(tableQual?.toLowerCase()) ?? tableQual;
             if (local.has(realTable))
                 return;
-            const schemaTable = tableByName.get(realTable);
+            const schemaTable = tableByName.get(realTable?.toLowerCase());
             // If the table itself is unknown, that's D8's job, not D9's.
             if (!schemaTable)
                 return;
-            const exists = schemaTable.columns.some((c) => c.name === colName);
+            const exists = hasColumn(schemaTable, colName);
             if (exists)
                 return;
             const key = `${realTable}.${colName}`;
@@ -66625,7 +66828,7 @@ function detectNotInNullable(ast, schema) {
     const tableByName = new Map();
     if (schema)
         for (const t of schema.tables)
-            tableByName.set(t.name, t);
+            tableByName.set(t.name.toLowerCase(), t);
     const seen = new Set();
     for (const stmt of asStatements(ast)) {
         if (!stmt)
@@ -66662,10 +66865,10 @@ function detectNotInNullable(ast, schema) {
                 const srcTable = fromList[0]?.table;
                 if (!colName || typeof srcTable !== 'string')
                     return;
-                const t = tableByName.get(srcTable);
+                const t = tableByName.get(srcTable?.toLowerCase());
                 if (!t)
                     return;
-                const c = t.columns.find((cc) => cc.name === colName);
+                const c = findColumn(t, colName);
                 if (!c?.nullable)
                     return;
                 const key = `sub::${lhsCol}::${srcTable}.${colName}`;
@@ -66722,7 +66925,7 @@ function detectAvgOverNullable(ast, schema) {
     const issues = [];
     const tableByName = new Map();
     for (const t of schema.tables)
-        tableByName.set(t.name, t);
+        tableByName.set(t.name.toLowerCase(), t);
     const seen = new Set();
     for (const stmt of asStatements(ast)) {
         if (stmt?.type !== 'select')
@@ -66731,9 +66934,9 @@ function detectAvgOverNullable(ast, schema) {
         if (Array.isArray(stmt.from)) {
             for (const f of stmt.from) {
                 if (f && typeof f.table === 'string') {
-                    aliasMap.set(f.table, f.table);
+                    aliasMap.set(f.table.toLowerCase(), f.table);
                     if (typeof f.as === 'string' && f.as)
-                        aliasMap.set(f.as, f.table);
+                        aliasMap.set(f.as.toLowerCase(), f.table);
                 }
             }
         }
@@ -66753,11 +66956,11 @@ function detectAvgOverNullable(ast, schema) {
                 continue;
             const colName = getColumnName(arg);
             const tableQual = getColumnTable(arg);
-            const realTable = tableQual ? aliasMap.get(tableQual) ?? tableQual : singleTable;
+            const realTable = tableQual ? aliasMap.get(tableQual?.toLowerCase()) ?? tableQual : singleTable;
             if (!colName || !realTable)
                 continue;
-            const t = tableByName.get(realTable);
-            const c = t?.columns.find((cc) => cc.name === colName);
+            const t = tableByName.get(realTable?.toLowerCase());
+            const c = findColumn(t, colName);
             if (!c?.nullable)
                 continue;
             const key = `${realTable}.${colName}`;
@@ -66864,12 +67067,13 @@ function detectUnknownAlias(ast) {
         }
         if (valid.size === 0)
             continue; // nothing to resolve against (e.g. FROM subquery only)
+        const validLower = identSet(valid);
         const seen = new Set();
         const visit = (node) => {
             const q = getColumnTable(node);
-            if (!q || valid.has(q) || seen.has(q))
+            if (!q || hasIdent(validLower, q) || hasIdent(seen, q))
                 return;
-            seen.add(q);
+            seen.add(q.toLowerCase());
             // D35: Levenshtein-nearest defined alias (edit distance ≤ 2) as a hint.
             const col = getColumnName(node);
             const nearest = nearestAlias(q, [...valid]);
@@ -66900,12 +67104,12 @@ function detectAmbiguousColumn(ast, schema) {
     const issues = [];
     const tableByName = new Map();
     for (const t of schema.tables)
-        tableByName.set(t.name, t);
+        tableByName.set(t.name.toLowerCase(), t);
     for (const stmt of asStatements(ast)) {
         if (stmt?.type !== 'select' || !Array.isArray(stmt.from) || stmt.from.length < 2)
             continue;
         const fromTables = stmt.from
-            .map((f) => (typeof f?.table === 'string' ? tableByName.get(f.table) : undefined))
+            .map((f) => (typeof f?.table === 'string' ? tableByName.get(f.table?.toLowerCase()) : undefined))
             .filter(Boolean);
         if (fromTables.length < 2)
             continue;
@@ -66918,12 +67122,12 @@ function detectAmbiguousColumn(ast, schema) {
             if (getColumnTable(node))
                 return; // qualified — not ambiguous
             const name = getColumnName(node);
-            if (!name || name === '*' || selectAliases.has(name))
+            if (!name || name === '*' || hasIdent(selectAliases, name))
                 return;
-            const owners = fromTables.filter((t) => t.columns.some((c) => c.name === name));
-            if (owners.length < 2 || seen.has(name))
+            const owners = fromTables.filter((t) => hasColumn(t, name));
+            if (owners.length < 2 || hasIdent(seen, name))
                 return;
-            seen.add(name);
+            seen.add(name.toLowerCase());
             issues.push({
                 id: 'AMBIGUOUS_COLUMN',
                 severity: 'warning',
@@ -66975,6 +67179,38 @@ function detectCartesianAndCrossJoin(ast) {
                     offendingClause: 'JOIN',
                     offendingTable: tableName,
                     metadata: { joinTable: tableName },
+                });
+            }
+        }
+        // ── Comma joins: FROM a, b with nothing relating them ────────────────────
+        // The loop above only inspects FROM entries carrying a `join` property, so
+        // the older comma syntax was invisible: `SELECT * FROM customers, payments`
+        // is a true Cartesian product and scored a clean 100. Found by the seeded
+        // benchmark (benchmark/METHODOLOGY.md), which is why it is fixed here.
+        //
+        // Deliberately conservative: a comma join WITH a column-to-column equality
+        // in WHERE is the classic pre-ANSI-92 join and is correct, so it must not
+        // fire. Only an unrelated comma join does.
+        const commaTables = stmt.from.filter((f) => f && !f.join && (f.table || f.as));
+        if (commaTables.length >= 2) {
+            let related = false;
+            forEachOnEquality(stmt.where, (left, right) => {
+                // Both sides are column references → the tables are related.
+                if (getColumnName(left) && getColumnName(right))
+                    related = true;
+            });
+            if (!related) {
+                const second = commaTables[1];
+                const tableName = typeof second.table === 'string' ? second.table : second.as;
+                issues.push({
+                    id: 'CARTESIAN_JOIN',
+                    severity: 'error',
+                    title: `Comma join with "${tableName}" has no relating condition`,
+                    description: `Listing ${commaTables.length} tables in FROM separated by commas, with no WHERE condition relating them, produces a Cartesian product: every row of one table paired with every row of "${tableName}".`,
+                    fix: `Relate the tables explicitly: JOIN ${tableName} ON .... If a Cartesian product is intended, write CROSS JOIN so the intent is visible.`,
+                    offendingClause: 'FROM',
+                    offendingTable: tableName,
+                    metadata: { joinTable: tableName, commaJoin: true, tableCount: commaTables.length },
                 });
             }
         }
@@ -67063,7 +67299,7 @@ function detectSuspiciousJoinKey(ast, schema) {
     const tableByName = new Map();
     if (schema)
         for (const t of schema.tables)
-            tableByName.set(t.name, t);
+            tableByName.set(t.name.toLowerCase(), t);
     for (const stmt of asStatements(ast)) {
         if (stmt?.type !== 'select' || !Array.isArray(stmt.from))
             continue;
@@ -67083,8 +67319,8 @@ function detectSuspiciousJoinKey(ast, schema) {
                     return;
                 if (lcol !== 'id')
                     return; // only the high-confidence `id = id` shape
-                const ltab = lq ? aliasMap.get(lq) ?? lq : '?';
-                const rtab = rq ? aliasMap.get(rq) ?? rq : '?';
+                const ltab = lq ? aliasMap.get(lq?.toLowerCase()) ?? lq : '?';
+                const rtab = rq ? aliasMap.get(rq?.toLowerCase()) ?? rq : '?';
                 const key = `${ltab}.${rtab}`;
                 if (seen.has(key))
                     return;
@@ -67092,9 +67328,9 @@ function detectSuspiciousJoinKey(ast, schema) {
                 // If schema knows a `<parent>_id` FK on either table, name it in the fix.
                 let suggestion = '';
                 const childFk = (childTab, parentTab) => {
-                    const t = tableByName.get(childTab);
+                    const t = tableByName.get(childTab?.toLowerCase());
                     const guess = `${parentTab.replace(/s$/, '')}_id`;
-                    return t?.columns.some((c) => c.name === guess) ? guess : null;
+                    return hasColumn(t, guess) ? guess : null;
                 };
                 const fk = (rq && childFk(rtab, ltab)) || (lq && childFk(ltab, rtab)) || null;
                 if (fk)
@@ -67119,7 +67355,40 @@ function detectSuspiciousJoinKey(ast, schema) {
 // Two+ child tables joined to the SAME parent key cross-multiply. With a measure
 // aggregate (SUM/AVG/MIN/MAX) it inflates the measure (F1); otherwise it's a
 // multi-1:M count pattern (F2).
-function detectFanOutJoins(ast) {
+// A join whose ON clause equates the JOINED table's primary key (or a unique
+// column) can match at most one row per left row, so it cannot multiply rows.
+// Without this check the fan-out detectors reason from schema relationships
+// alone and flag joins that are arithmetically incapable of fanning out.
+// Found by the BIRD benchmark: `card JOIN disp ON card.disp_id = disp.disp_id`
+// where disp_id is disp's PK was reported as a fan-out.
+function joinTargetsUniqueKey(join, schema) {
+    if (!schema || !join?.on)
+        return false;
+    const tableName = typeof join.table === 'string' ? join.table : undefined;
+    if (!tableName)
+        return false;
+    const schemaTable = findTable(schema, tableName);
+    if (!schemaTable)
+        return false;
+    // Qualifiers that refer to THIS join's table (its own name or its alias).
+    const selfQualifiers = identSet([tableName, typeof join.as === 'string' ? join.as : ''].filter(Boolean));
+    let unique = false;
+    forEachOnEquality(join.on, (left, right) => {
+        for (const node of [left, right]) {
+            if (node?.type !== 'column_ref')
+                continue;
+            const q = getColumnTable(node);
+            const c = getColumnName(node);
+            if (!c || !q || !hasIdent(selfQualifiers, q))
+                continue;
+            const col = findColumn(schemaTable, c);
+            if (col?.isPK)
+                unique = true;
+        }
+    });
+    return unique;
+}
+function detectFanOutJoins(ast, schema) {
     const issues = [];
     for (const stmt of asStatements(ast)) {
         if (stmt?.type !== 'select' || !Array.isArray(stmt.from))
@@ -67127,7 +67396,12 @@ function detectFanOutJoins(ast) {
         // CTE / subquery-in-FROM targets are pre-collapsed (1:1 with their key), so
         // they don't fan out — exclude them to avoid flagging safe pre-aggregations.
         const local = collectLocalTableNames(stmt);
-        const joins = stmt.from.filter((f) => f?.join && f.on && typeof f.table === 'string' && !local.has(f.table));
+        const joins = stmt.from.filter((f) => f?.join &&
+            f.on &&
+            typeof f.table === 'string' &&
+            !hasIdent(identSet(local), f.table) &&
+            // A join onto the target's primary key is at most 1:1 and cannot fan out.
+            !joinTargetsUniqueKey(f, schema));
         if (joins.length < 2)
             continue;
         const aliasMap = buildAliasMap(stmt);
@@ -67168,7 +67442,7 @@ function detectFanOutJoins(ast) {
             const c = getColumnName(arg);
             if (!c)
                 continue;
-            measure = { func: fn.toUpperCase(), column: c, table: q ? aliasMap.get(q) ?? q : '?' };
+            measure = { func: fn.toUpperCase(), column: c, table: q ? aliasMap.get(q?.toLowerCase()) ?? q : '?' };
             break;
         }
         if (measure) {
@@ -67279,7 +67553,7 @@ function detectIntegerDivision(ast, schema) {
     const tableByName = new Map();
     if (schema)
         for (const t of schema.tables)
-            tableByName.set(t.name, t);
+            tableByName.set(t.name.toLowerCase(), t);
     for (const stmt of asStatements(ast)) {
         if (stmt?.type !== 'select')
             continue;
@@ -67293,11 +67567,11 @@ function detectIntegerDivision(ast, schema) {
                 return null;
             const colName = getColumnName(node);
             const q = getColumnTable(node);
-            const realTable = q ? aliasMap.get(q) ?? q : singleTable;
+            const realTable = q ? aliasMap.get(q?.toLowerCase()) ?? q : singleTable;
             if (!colName || !realTable)
                 return null;
-            const t = tableByName.get(realTable);
-            return t?.columns.find((c) => c.name === colName)?.type ?? null;
+            const t = tableByName.get(realTable?.toLowerCase());
+            return findColumn(t, colName)?.type ?? null;
         };
         const isIntegerProducing = (n) => {
             if (isCountAgg(n))
@@ -67380,7 +67654,7 @@ function detectMissingTimeFilter(ast, schema) {
     const issues = [];
     const tableByName = new Map();
     for (const t of schema.tables)
-        tableByName.set(t.name, t);
+        tableByName.set(t.name.toLowerCase(), t);
     for (const stmt of asStatements(ast)) {
         if (stmt?.type !== 'select' || !stmt.where || !Array.isArray(stmt.from))
             continue;
@@ -67389,7 +67663,7 @@ function detectMissingTimeFilter(ast, schema) {
         if (!hasSum)
             continue;
         const dateTable = stmt.from
-            .map((f) => (typeof f?.table === 'string' ? tableByName.get(f.table) : undefined))
+            .map((f) => (typeof f?.table === 'string' ? tableByName.get(f.table?.toLowerCase()) : undefined))
             .find((t) => t && t.columns.some((c) => isDateColumn(c)));
         if (!dateTable)
             continue;
@@ -67520,7 +67794,7 @@ function detectCountStarVsCountCol(ast, schema) {
     const issues = [];
     const tableByName = new Map();
     for (const t of schema.tables)
-        tableByName.set(t.name, t);
+        tableByName.set(t.name.toLowerCase(), t);
     for (const stmt of asStatements(ast)) {
         if (stmt?.type !== 'select')
             continue;
@@ -67540,11 +67814,11 @@ function detectCountStarVsCountCol(ast, schema) {
                 continue; // COUNT(*) is fine
             const colName = getColumnName(arg);
             const q = getColumnTable(arg);
-            const realTable = q ? aliasMap.get(q) ?? q : singleTable;
+            const realTable = q ? aliasMap.get(q?.toLowerCase()) ?? q : singleTable;
             if (!colName || !realTable)
                 continue;
-            const t = tableByName.get(realTable);
-            const c = t?.columns.find((cc) => cc.name === colName);
+            const t = tableByName.get(realTable?.toLowerCase());
+            const c = findColumn(t, colName);
             if (!c)
                 continue; // unknown column is D9's job
             if (!c.nullable)
@@ -67872,13 +68146,586 @@ function detectDialectLimitTop(sql, dialect) {
     }
     return issues;
 }
+// ════════════════════════════════════════════════════════════════════════════
+// Sprint 8 — dbt manifest context detectors
+// ════════════════════════════════════════════════════════════════════════════
+// Both read the DbtContext produced by parseDbtArtifacts and are strict
+// no-ops without it, so every non-dbt caller is unchanged. Neither reads the
+// schema today; the parameter keeps the Sprint 8 detectors on one shape so a
+// later schema-aware refinement does not change the call site.
+// Every base relation a statement references (FROM + JOIN targets), with the
+// clause it appears in. CTE / subquery aliases are locally defined, not dbt
+// relations, and are skipped. Statements are treated independently.
+function collectRelationRefs(stmt) {
+    const out = [];
+    if (!stmt)
+        return out;
+    const local = identSet(collectLocalTableNames(stmt));
+    const seen = new Set();
+    const push = (name, clause) => {
+        if (typeof name !== 'string' || !name || hasIdent(local, name) || hasIdent(seen, name))
+            return;
+        seen.add(name.toLowerCase());
+        out.push({ name, clause });
+    };
+    if (Array.isArray(stmt.from)) {
+        for (const f of stmt.from)
+            push(f?.table, f?.join ? 'JOIN' : 'FROM');
+    }
+    if (stmt.type === 'update' || stmt.type === 'delete' || stmt.type === 'insert') {
+        const tables = Array.isArray(stmt.table) ? stmt.table : stmt.table ? [stmt.table] : [];
+        for (const t of tables)
+            push(typeof t === 'string' ? t : t?.table, 'FROM');
+    }
+    return out;
+}
+// ── UNAPPROVED_SOURCE ────────────────────────────────────────────────────────
+// A query reads a raw dbt source directly while a trusted (non-ephemeral)
+// model built from that source exists. The nearest such model is named as
+// the substitute. Exemption is STRUCTURAL, not name-based: the model being
+// validated is itself one of the source's downstream marts AND depends on the
+// source directly — i.e. it is the staging model whose job is to read the raw
+// table. A mart reaching past its staging layer, or an ad-hoc query with no
+// currentModel, is flagged.
+function detectUnapprovedSource(ast, _schema, context) {
+    if (!context)
+        return [];
+    const issues = [];
+    const current = context.currentModel ? context.models.get(context.currentModel.toLowerCase()) : undefined;
+    for (const stmt of asStatements(ast)) {
+        for (const ref of collectRelationRefs(stmt)) {
+            const source = context.sources.get(ref.name.toLowerCase());
+            if (!source)
+                continue;
+            const marts = context.sourceToMart.get(ref.name.toLowerCase()) ?? [];
+            if (marts.length === 0)
+                continue; // raw source with no curated alternative — nothing to recommend
+            if (current && isDirectStagingModelFor(current, source.relation, marts))
+                continue;
+            const nearest = marts[0];
+            const others = marts.slice(1);
+            issues.push({
+                id: 'UNAPPROVED_SOURCE',
+                severity: 'warning',
+                title: `Raw source "${ref.name}" queried directly`,
+                description: `Query reads from raw source '${ref.name}' directly. A trusted mart '${nearest}' exists downstream. ` +
+                    `Consider querying the mart instead.`,
+                fix: `Replace "${ref.name}" with "${nearest}" — the nearest dbt model built from this source` +
+                    (others.length > 0 ? ` (also available: ${others.join(', ')}).` : '.'),
+                offendingClause: ref.clause,
+                offendingTable: ref.name,
+                metadata: { table: ref.name, sourceName: source.sourceName, nearestMart: nearest, marts },
+            });
+        }
+    }
+    return issues;
+}
+function isDirectStagingModelFor(current, sourceRelation, marts) {
+    const isMart = marts.some((m) => identEq(m, current.relation));
+    const readsDirectly = current.dependsOn.some((d) => identEq(d, sourceRelation));
+    return isMart && readsDirectly;
+}
+// ── FINANCE_TAG_UNVALIDATED ──────────────────────────────────────────────────
+// A referenced relation carries a sensitive tag (default finance / pii) and
+// its most recent dbt run did not succeed — or it has no run result at all.
+// dbt's status vocabulary is compared raw: anything other than 'success'
+// (error, fail, skip, warn, pass, or absent) is a reason to review before the
+// numbers leave the warehouse.
+function detectFinanceTagUnvalidated(ast, _schema, context) {
+    if (!context)
+        return [];
+    const issues = [];
+    const sensitive = context.sensitiveTags.map((t) => t.toLowerCase());
+    for (const stmt of asStatements(ast)) {
+        for (const ref of collectRelationRefs(stmt)) {
+            const key = ref.name.toLowerCase();
+            const rel = context.models.get(key) ?? context.sources.get(key);
+            if (!rel)
+                continue;
+            // First matching tag in the configured order, so 'finance' wins over
+            // 'pii' when a relation carries both.
+            const tag = sensitive.find((t) => rel.tags.includes(t));
+            if (!tag)
+                continue;
+            if (rel.lastRunStatus === 'success')
+                continue;
+            const status = rel.lastRunStatus ?? 'unknown';
+            issues.push({
+                id: 'FINANCE_TAG_UNVALIDATED',
+                severity: 'warning',
+                title: `"${ref.name}" is tagged ${tag} and its last run did not succeed`,
+                description: `Query references '${ref.name}' tagged '${tag}'. Last validation status: ${status}. ` +
+                    `Review required before export or scheduling.`,
+                fix: `Re-run and validate "${ref.name}" (dbt run --select ${rel.relation} && dbt test --select ${rel.relation}) ` +
+                    `before exporting or scheduling results built on it.`,
+                offendingClause: ref.clause,
+                offendingTable: ref.name,
+                metadata: {
+                    table: ref.name,
+                    tag,
+                    lastRunStatus: status,
+                    ...(rel.owner ? { owner: rel.owner } : {}),
+                },
+            });
+        }
+    }
+    return issues;
+}
+
+;// CONCATENATED MODULE: ../src/services/dbtArtifacts.ts
+// Sprint 8 — dbt manifest integration.
+//
+// Pure translation of dbt `target/` artifacts (manifest.json, catalog.json,
+// run_results.json) into two things the engine already understands or can be
+// handed alongside a request:
+//
+//   1. an enriched SchemaDefinition — complete column lists and real warehouse
+//      types from the catalog, PK / FK / nullable derived from the project's
+//      own `unique`, `not_null` and `relationships` tests;
+//   2. a DbtContext — which relations are sources vs models, their tags,
+//      materialization, last run status and lineage, plus the derived
+//      source → trusted-mart map the UNAPPROVED_SOURCE detector reads.
+//
+// No I/O and no side effects: callers (CLI, Action, API, Python package) read
+// the files and hand over parsed JSON. Nothing dbt-specific leaks into the
+// detectors — they see SchemaDefinition + DbtContext only.
+//
+// Manifest schema versions v10, v11 and v12 (dbt 1.5 → 1.8+) are handled. The
+// keys read are the stable ones: nodes, sources, child_map, depends_on,
+// columns, tags, config.materialized, resource_type, test_metadata.
+const DEFAULT_SENSITIVE_TAGS = ['finance', 'pii'];
+const RELATION_TYPES = new Set(['model', 'seed', 'snapshot']);
+const SUPPORTED_SCHEMA_VERSIONS = ['v10', 'v11', 'v12'];
+// ── Public helpers ───────────────────────────────────────────────────────────
+function looksLikeDbtManifest(value) {
+    if (!value || typeof value !== 'object')
+        return false;
+    const nodes = value.nodes;
+    return !!nodes && typeof nodes === 'object' && !Array.isArray(nodes);
+}
+// Explicit user DDL wins per table; tables only the artifacts know about are
+// appended. One merge shared by the CLI, Action and API so precedence cannot
+// drift between surfaces.
+function mergeSchemas(primary, fallback) {
+    if (!primary || primary.tables.length === 0)
+        return fallback;
+    const seen = new Set(primary.tables.map((t) => t.name.toLowerCase()));
+    const extra = fallback.tables.filter((t) => !seen.has(t.name.toLowerCase()));
+    return { tables: [...primary.tables, ...extra] };
+}
+// ── Main entry ───────────────────────────────────────────────────────────────
+function parseDbtArtifacts(input) {
+    const { manifest, catalog, runResults } = input;
+    if (!looksLikeDbtManifest(manifest)) {
+        throw new Error('parseDbtArtifacts: `manifest` must be a parsed dbt manifest.json with a `nodes` map');
+    }
+    const warnings = [];
+    const schemaVersion = schemaVersionOf(manifest);
+    if (schemaVersion && !SUPPORTED_SCHEMA_VERSIONS.includes(schemaVersion)) {
+        warnings.push(`manifest schema ${schemaVersion} is outside the tested range (${SUPPORTED_SCHEMA_VERSIONS.join(', ')}); parsing on a best-effort basis`);
+    }
+    // 1. Relations: every model / seed / snapshot node plus every source.
+    const nodes = manifest.nodes ?? {};
+    const sources = manifest.sources ?? {};
+    const relationById = new Map(); // unique_id → relation name
+    for (const node of Object.values(nodes)) {
+        if (RELATION_TYPES.has(node.resource_type))
+            relationById.set(node.unique_id, nodeRelation(node));
+    }
+    for (const src of Object.values(sources))
+        relationById.set(src.unique_id, sourceRelation(src));
+    // 2. Run statuses by unique_id.
+    const statusById = new Map();
+    for (const r of runResults?.results ?? []) {
+        if (r && typeof r.unique_id === 'string')
+            statusById.set(r.unique_id, normaliseStatus(r.status));
+    }
+    // 3. Column tests → PK / nullable / FK facts per (unique_id, column).
+    const columnFacts = collectColumnFacts(nodes, relationById, warnings);
+    // 4. Lineage: child map (from the manifest, or inverted from depends_on).
+    const childMap = manifest.child_map ?? invertDependsOn(nodes);
+    const reachFromSource = new Map(); // source id → (node id → depth)
+    for (const src of Object.values(sources))
+        reachFromSource.set(src.unique_id, reachable(src.unique_id, childMap));
+    const isQueryableModel = (id) => {
+        const n = nodes[id];
+        return !!n && n.resource_type === 'model' && materializedOf(n) !== 'ephemeral';
+    };
+    const trustedMartIds = new Set();
+    for (const reach of reachFromSource.values()) {
+        for (const id of reach.keys())
+            if (isQueryableModel(id))
+                trustedMartIds.add(id);
+    }
+    // 5. Build context maps.
+    const models = new Map();
+    const sourceMap = new Map();
+    for (const node of Object.values(nodes)) {
+        if (!RELATION_TYPES.has(node.resource_type))
+            continue;
+        const relation = nodeRelation(node);
+        const physical = nodePhysical(node);
+        const meta = {
+            uniqueId: node.unique_id,
+            relation,
+            ...(physical ? { physicalName: physical } : {}),
+            resourceType: node.resource_type,
+            tags: tagsOf(node),
+            materialized: materializedOf(node),
+            isTrustedMart: trustedMartIds.has(node.unique_id),
+            lastRunStatus: statusById.get(node.unique_id),
+            dependsOn: (node.depends_on?.nodes ?? [])
+                .map((id) => relationById.get(id))
+                .filter((r) => typeof r === 'string'),
+            owner: ownerOf(node),
+        };
+        models.set(relation.toLowerCase(), meta);
+        if (physical)
+            models.set(physical.toLowerCase(), meta);
+    }
+    for (const src of Object.values(sources)) {
+        const relation = sourceRelation(src);
+        const physical = sourcePhysical(src);
+        const meta = {
+            uniqueId: src.unique_id,
+            relation,
+            ...(physical ? { physicalName: physical } : {}),
+            resourceType: 'source',
+            sourceName: src.source_name,
+            tags: tagsOf(src),
+            materialized: '',
+            isTrustedMart: false,
+            lastRunStatus: statusById.get(src.unique_id),
+            dependsOn: [],
+            owner: ownerOf(src),
+        };
+        sourceMap.set(relation.toLowerCase(), meta);
+        if (physical)
+            sourceMap.set(physical.toLowerCase(), meta);
+    }
+    // 6. source → marts, nearest first.
+    const sourceToMart = new Map();
+    for (const src of Object.values(sources)) {
+        const reach = reachFromSource.get(src.unique_id) ?? new Map();
+        const marts = [...reach.entries()]
+            .filter(([id]) => isQueryableModel(id))
+            .map(([id, depth]) => ({ relation: relationById.get(id), depth }))
+            .sort((a, b) => a.depth - b.depth || a.relation.localeCompare(b.relation))
+            .map((m) => m.relation);
+        sourceToMart.set(sourceRelation(src).toLowerCase(), marts);
+        const physical = sourcePhysical(src);
+        if (physical)
+            sourceToMart.set(physical.toLowerCase(), marts);
+    }
+    // 7. Schema: one table per relation; catalog columns win on type and
+    //    completeness, manifest supplies the documented subset and the tests.
+    const tables = [];
+    const catalogNodes = { ...(catalog?.nodes ?? {}), ...(catalog?.sources ?? {}) };
+    const seenTable = new Set();
+    const addTable = (uniqueId, relation, manifestCols) => {
+        const key = relation.toLowerCase();
+        if (seenTable.has(key)) {
+            warnings.push(`relation "${relation}" is defined more than once (${uniqueId}); keeping the first definition`);
+            return;
+        }
+        seenTable.add(key);
+        const cat = catalogNodes[uniqueId];
+        const facts = columnFacts.get(uniqueId) ?? new Map();
+        // Column order: catalog index when present, else manifest order.
+        const names = new Map(); // lower → display
+        const ordered = [];
+        if (cat) {
+            const cols = Object.values(cat.columns ?? {}).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+            for (const c of cols) {
+                if (!c?.name)
+                    continue;
+                const lower = c.name.toLowerCase();
+                if (!names.has(lower)) {
+                    names.set(lower, { type: c.type || 'TEXT' });
+                    ordered.push(c.name);
+                }
+            }
+        }
+        for (const c of Object.values(manifestCols ?? {})) {
+            if (!c?.name)
+                continue;
+            const lower = c.name.toLowerCase();
+            if (!names.has(lower)) {
+                names.set(lower, { type: c.data_type || 'TEXT' });
+                ordered.push(c.name);
+            }
+            // catalog type wins; manifest data_type only fills a gap
+        }
+        const columns = ordered.map((name) => {
+            const lower = name.toLowerCase();
+            const f = facts.get(lower);
+            const isPK = !!(f?.unique && f?.notNull);
+            return {
+                name,
+                type: names.get(lower)?.type ?? 'TEXT',
+                nullable: !(f?.notNull || isPK),
+                isPK,
+                isFK: !!f?.fkTable,
+                ...(f?.fkTable ? { fkReferencesTable: f.fkTable } : {}),
+                ...(f?.fkColumn ? { fkReferencesColumn: f.fkColumn } : {}),
+            };
+        });
+        const rows = rowCountOf(cat);
+        tables.push({ name: relation, columns, ...(rows !== undefined ? { estimatedRows: rows } : {}) });
+    };
+    for (const node of Object.values(nodes)) {
+        if (!RELATION_TYPES.has(node.resource_type))
+            continue;
+        addTable(node.unique_id, nodeRelation(node), node.columns);
+        const physical = nodePhysical(node);
+        if (physical)
+            addTable(node.unique_id, physical, node.columns);
+    }
+    for (const src of Object.values(sources)) {
+        addTable(src.unique_id, sourceRelation(src), src.columns);
+        const physical = sourcePhysical(src);
+        if (physical)
+            addTable(src.unique_id, physical, src.columns);
+    }
+    // Catalog nodes with no manifest twin are stale docs — say so, don't invent tables.
+    for (const id of Object.keys(catalogNodes)) {
+        if (!relationById.has(id))
+            warnings.push(`catalog node ${id} has no manifest counterpart; ignored`);
+    }
+    const sensitiveTags = (input.sensitiveTags ?? DEFAULT_SENSITIVE_TAGS).map((t) => t.toLowerCase());
+    return {
+        schema: { tables },
+        context: {
+            models,
+            sources: sourceMap,
+            sourceToMart,
+            sensitiveTags,
+            ...(input.currentModel ? { currentModel: input.currentModel } : {}),
+            artifacts: { catalog: !!catalog, runResults: !!runResults },
+            ...(manifest.metadata?.dbt_version ? { dbtVersion: manifest.metadata.dbt_version } : {}),
+            ...(manifest.metadata?.generated_at ? { generatedAt: manifest.metadata.generated_at } : {}),
+        },
+        warnings,
+    };
+}
+function nodeRelation(node) {
+    return node.name;
+}
+function nodePhysical(node) {
+    return node.alias && node.alias.toLowerCase() !== node.name.toLowerCase() ? node.alias : undefined;
+}
+function sourceRelation(src) {
+    return src.name;
+}
+function sourcePhysical(src) {
+    return src.identifier && src.identifier.toLowerCase() !== src.name.toLowerCase() ? src.identifier : undefined;
+}
+function materializedOf(node) {
+    return String(node.config?.materialized ?? '').toLowerCase();
+}
+function tagsOf(node) {
+    const cfg = node.config?.tags;
+    const fromConfig = Array.isArray(cfg) ? cfg : typeof cfg === 'string' ? [cfg] : [];
+    const out = new Set();
+    for (const t of [...(node.tags ?? []), ...fromConfig])
+        if (typeof t === 'string' && t)
+            out.add(t.toLowerCase());
+    return [...out];
+}
+function ownerOf(node) {
+    const o = node.meta?.owner ?? node.config?.meta?.owner;
+    return typeof o === 'string' && o ? o : undefined;
+}
+function schemaVersionOf(manifest) {
+    const url = manifest.metadata?.dbt_schema_version;
+    if (typeof url !== 'string')
+        return null;
+    const m = /manifest\/(v\d+)\.json/.exec(url);
+    return m ? m[1] : null;
+}
+function normaliseStatus(raw) {
+    const s = String(raw ?? '').toLowerCase();
+    if (s === 'skipped')
+        return 'skip';
+    if (s === 'success' || s === 'error' || s === 'skip' || s === 'fail' || s === 'warn' || s === 'pass')
+        return s;
+    // Unknown vocabulary is treated as not-success rather than dropped — an
+    // unfamiliar status is exactly the case a reviewer should look at.
+    return 'error';
+}
+function rowCountOf(cat) {
+    const v = cat?.stats?.row_count?.value;
+    if (typeof v === 'number' && Number.isFinite(v))
+        return v;
+    if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)))
+        return Number(v);
+    return undefined;
+}
+// `to: ref('x')` / `ref('pkg','x')` / `source('s','t')` → relation name. dbt's
+// relation is always the LAST quoted argument (mirrors validate_dbt.py).
+function relationFromRefExpr(expr, relationById, dependsOn) {
+    if (typeof expr !== 'string')
+        return null;
+    const quoted = [...expr.matchAll(/['"]([^'"]+)['"]/g)].map((m) => m[1]);
+    if (quoted.length === 0)
+        return null;
+    const wanted = quoted[quoted.length - 1].toLowerCase();
+    // Prefer the depends_on node whose relation matches — resolves aliases.
+    for (const id of dependsOn) {
+        const rel = relationById.get(id);
+        if (rel && rel.toLowerCase() === wanted)
+            return rel;
+        // ref('x') names the model by NAME even when it has an alias.
+        const suffix = id.split('.').pop()?.toLowerCase();
+        if (rel && suffix === wanted)
+            return rel;
+    }
+    return quoted[quoted.length - 1];
+}
+// The model a generic test is attached to: `attached_node` (v11+), else the
+// depends_on node that is NOT the relationships target (v10).
+function attachedModelId(test, toId) {
+    if (typeof test.attached_node === 'string' && test.attached_node)
+        return test.attached_node;
+    const deps = test.depends_on?.nodes ?? [];
+    const candidates = deps.filter((id) => id !== toId && !id.startsWith('macro.'));
+    return candidates[0] ?? null;
+}
+function collectColumnFacts(nodes, relationById, warnings) {
+    const facts = new Map();
+    const factsFor = (modelId, column) => {
+        let m = facts.get(modelId);
+        if (!m)
+            facts.set(modelId, (m = new Map()));
+        const key = column.toLowerCase();
+        let f = m.get(key);
+        if (!f)
+            m.set(key, (f = {}));
+        return f;
+    };
+    for (const node of Object.values(nodes)) {
+        if (node.resource_type !== 'test' || !node.test_metadata)
+            continue;
+        const kind = String(node.test_metadata.name ?? '').toLowerCase();
+        const kwargs = node.test_metadata.kwargs ?? {};
+        const column = typeof kwargs.column_name === 'string' ? kwargs.column_name : null;
+        if (!column)
+            continue;
+        const deps = (node.depends_on?.nodes ?? []).filter((id) => !id.startsWith('macro.'));
+        if (kind === 'unique' || kind === 'not_null') {
+            const modelId = attachedModelId(node, null);
+            if (!modelId)
+                continue;
+            const f = factsFor(modelId, column);
+            if (kind === 'unique')
+                f.unique = true;
+            else
+                f.notNull = true;
+            continue;
+        }
+        if (kind === 'relationships') {
+            // The `to` target is whichever depends_on node the `to:` expression names.
+            const toRel = relationFromRefExpr(kwargs.to, relationById, deps);
+            if (!toRel) {
+                warnings.push(`relationships test ${node.unique_id} has an unparsable \`to\`; FK not derived`);
+                continue;
+            }
+            const toId = deps.find((id) => relationById.get(id)?.toLowerCase() === toRel.toLowerCase()) ?? null;
+            const modelId = attachedModelId(node, toId);
+            if (!modelId)
+                continue;
+            const f = factsFor(modelId, column);
+            f.fkTable = toRel;
+            if (typeof kwargs.field === 'string' && kwargs.field)
+                f.fkColumn = kwargs.field;
+        }
+    }
+    return facts;
+}
+function invertDependsOn(nodes) {
+    const out = {};
+    for (const node of Object.values(nodes)) {
+        for (const parent of node.depends_on?.nodes ?? []) {
+            (out[parent] ??= []).push(node.unique_id);
+        }
+    }
+    return out;
+}
+// BFS over the child map from `start`, returning every reachable node with its
+// depth. Ephemeral models are traversed (they are CTEs, not destinations) and
+// filtered by the caller; tests / exposures are reachable too but are never
+// queryable models so they fall out at the same filter.
+function reachable(start, childMap) {
+    const depth = new Map();
+    const queue = (childMap[start] ?? []).map((id) => [id, 1]);
+    while (queue.length > 0) {
+        const [id, d] = queue.shift();
+        if (depth.has(id))
+            continue;
+        depth.set(id, d);
+        for (const child of childMap[id] ?? [])
+            if (!depth.has(child))
+                queue.push([child, d + 1]);
+    }
+    return depth;
+}
 
 ;// CONCATENATED MODULE: ../src/services/fileValidation.ts
 
 
-function validateSqlSource(sql, schemaSql, dialect = 'postgresql') {
+
+function validateSqlSource(sql, schemaSql, dialect = 'postgresql', 
+// Sprint 5C — omit for the full detector set. The REST API passes the caller's
+// plan; the CLI and GitHub Action run the local engine and pass nothing.
+tier) {
     const schema = schemaSql && schemaSql.trim() ? parseDDL(schemaSql, dialect) : undefined;
-    return validateSQL({ sql, schema, dialect });
+    return validateSQL({ sql, schema, dialect, tier });
+}
+function prepareDbtContext(artifacts) {
+    return parseDbtArtifacts(artifacts);
+}
+// dbt's model-name rule: the SQL file's basename without its extension.
+// `models/staging/stg_orders.sql` → `stg_orders`. Returns undefined for a
+// name that is not a relation in the manifest, so an ad-hoc file passes no
+// currentModel and the staging exemption cannot misfire.
+function modelNameFromFilename(filename, context) {
+    if (!filename)
+        return undefined;
+    const base = filename.replace(/\\/g, '/').split('/').pop() ?? '';
+    const stem = base.replace(/\.[^.]+$/, '');
+    if (!stem)
+        return undefined;
+    const rel = context.models.get(stem.toLowerCase());
+    return rel ? rel.relation : undefined;
+}
+function validateSqlWithDbt(sql, dbt, schemaSql, dialect = 'postgresql', tier, currentModel) {
+    const userSchema = schemaSql && schemaSql.trim() ? parseDDL(schemaSql, dialect) : undefined;
+    const schema = mergeSchemas(userSchema, dbt.schema);
+    const context = currentModel ? { ...dbt.context, currentModel } : dbt.context;
+    return validateSQL({ sql, schema, dialect, tier, dbtContext: context });
+}
+function summarizeDbtContext(ctx) {
+    const uniqueModels = new Set([...ctx.models.values()].map((m) => m.uniqueId));
+    const uniqueSources = new Set([...ctx.sources.values()].map((s) => s.uniqueId));
+    const tagged = new Set();
+    for (const rel of [...ctx.models.values(), ...ctx.sources.values()]) {
+        if (rel.tags.some((t) => ctx.sensitiveTags.includes(t)))
+            tagged.add(rel.uniqueId);
+    }
+    return {
+        models: uniqueModels.size,
+        sources: uniqueSources.size,
+        sensitiveTagged: tagged.size,
+        artifacts: ctx.artifacts,
+    };
+}
+// Two-line banner printed ahead of a text report when dbt context is active.
+// "Finance-tagged" counts relations carrying ANY configured sensitive tag; the
+// label is the product term, not the tag name.
+function dbtContextBanner(ctx) {
+    const s = summarizeDbtContext(ctx);
+    return ('SafeSQL Guard — dbt manifest context loaded\n' +
+        `Models: ${s.models} | Sources: ${s.sources} | Finance-tagged: ${s.sensitiveTagged}`);
 }
 function exitCodeFor(report, failOnWarnings = false) {
     if (report.errors.length > 0)
@@ -67914,10 +68761,21 @@ function formatReportText(report, filename) {
     return lines.join('\n');
 }
 function runValidation(opts) {
-    const report = validateSqlSource(opts.sql, opts.schemaSql, opts.dialect);
+    if (!opts.dbtArtifacts) {
+        const report = validateSqlSource(opts.sql, opts.schemaSql, opts.dialect);
+        const output = opts.json
+            ? JSON.stringify(report, null, 2)
+            : formatReportText(report, opts.filename ?? 'query.sql');
+        return { report, output, exitCode: exitCodeFor(report, opts.failOnWarnings) };
+    }
+    // Sprint 8 (dbt): artifacts present — merge the derived schema under any
+    // explicit DDL and hand the context to the engine.
+    const dbt = prepareDbtContext(opts.dbtArtifacts);
+    const currentModel = modelNameFromFilename(opts.filename, dbt.context);
+    const report = validateSqlWithDbt(opts.sql, dbt, opts.schemaSql, opts.dialect, undefined, currentModel);
     const output = opts.json
-        ? JSON.stringify(report, null, 2)
-        : formatReportText(report, opts.filename ?? 'query.sql');
+        ? JSON.stringify({ ...report, dbtContext: { ...summarizeDbtContext(dbt.context), warnings: dbt.warnings } }, null, 2)
+        : dbtContextBanner(dbt.context) + '\n' + formatReportText(report, opts.filename ?? 'query.sql');
     return { report, output, exitCode: exitCodeFor(report, opts.failOnWarnings) };
 }
 function summaryTable(results) {
@@ -67928,6 +68786,39 @@ function summaryTable(results) {
 // Aggregate exit decision across many files (used by the Action).
 function anyFailing(results, failOnWarnings = false) {
     return results.some((r) => exitCodeFor(r.report, failOnWarnings) !== 0);
+}
+
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = require("node:path");
+;// CONCATENATED MODULE: ../cli/dbtTarget.ts
+
+
+
+// Sprint 8 (dbt): read a dbt target/ directory. manifest.json is required;
+// catalog.json and run_results.json are used when present. The parser
+// (src/services/dbtArtifacts.ts) is pure — file I/O lives here, shared by the
+// CLI (--dbt-target) and the GitHub Action (dbt_target).
+const DBT_ARTIFACT_FILES = {
+    manifest: 'manifest.json',
+    catalog: 'catalog.json',
+    runResults: 'run_results.json',
+};
+function readDbtTarget(dir, flag = '--dbt-target') {
+    const manifestPath = (0,external_node_path_namespaceObject.join)(dir, DBT_ARTIFACT_FILES.manifest);
+    if (!(0,external_node_fs_namespaceObject.existsSync)(manifestPath)) {
+        throw new Error(`${flag}: no manifest.json in ${dir} (run \`dbt compile\` or \`dbt run\` first)`);
+    }
+    const manifest = JSON.parse((0,external_node_fs_namespaceObject.readFileSync)(manifestPath, 'utf8'));
+    if (!looksLikeDbtManifest(manifest)) {
+        throw new Error(`${flag}: ${manifestPath} is not a dbt manifest (no \`nodes\` map)`);
+    }
+    const optional = (name) => {
+        const p = (0,external_node_path_namespaceObject.join)(dir, name);
+        return (0,external_node_fs_namespaceObject.existsSync)(p) ? JSON.parse((0,external_node_fs_namespaceObject.readFileSync)(p, 'utf8')) : undefined;
+    };
+    const catalog = optional(DBT_ARTIFACT_FILES.catalog);
+    const runResults = optional(DBT_ARTIFACT_FILES.runResults);
+    return { manifest, ...(catalog ? { catalog } : {}), ...(runResults ? { runResults } : {}) };
 }
 
 ;// CONCATENATED MODULE: ../src/services/issueLocator.ts
@@ -68112,6 +69003,7 @@ function buildReviewBody(files, unanchored, blocking) {
 
 
 
+
 // Thin GitHub Action wrapper around the shared SafeSQL engine. Validator logic
 // is imported from src/services/ — never duplicated here.
 //
@@ -68119,26 +69011,46 @@ function buildReviewBody(files, unanchored, blocking) {
 //   validate   (default) — glob SQL files, validate, write a job summary
 //   pr-review            — validate only the SQL files changed in the PR and
 //                          post inline review comments on the diff
+// Prepared once per run when `dbt_target` is set; undefined otherwise.
+function loadDbtContext() {
+    const dir = core.getInput('dbt_target');
+    if (!dir)
+        return undefined;
+    const dbt = prepareDbtContext(readDbtTarget(dir, 'dbt_target'));
+    for (const w of dbt.warnings)
+        core.warning(`SafeSQL dbt: ${w}`);
+    core.info(dbtContextBanner(dbt.context));
+    return dbt;
+}
+// One validation call that picks the dbt path when context is loaded. The
+// model name comes from the file's basename (dbt's rule) and is only used when
+// the manifest knows it.
+function validateFile(sql, filename, schemaSql, dialect, dbt) {
+    if (!dbt)
+        return validateSqlSource(sql, schemaSql, dialect);
+    return validateSqlWithDbt(sql, dbt, schemaSql, dialect, undefined, modelNameFromFilename(filename, dbt.context));
+}
 async function runValidate() {
     const pattern = core.getInput('sql_files') || '**/*.sql';
     const schemaFile = core.getInput('schema_file');
     const dialect = (core.getInput('dialect') || 'postgresql');
     const failOnWarnings = core.getInput('fail_on_warnings') === 'true';
     const schemaSql = schemaFile ? (0,external_node_fs_namespaceObject.readFileSync)(schemaFile, 'utf8') : undefined;
+    const dbt = loadDbtContext();
     const globber = await glob.create(pattern);
     const files = await globber.glob();
     const results = [];
     let totalIssues = 0;
     for (const file of files) {
         const sql = (0,external_node_fs_namespaceObject.readFileSync)(file, 'utf8');
-        const report = validateSqlSource(sql, schemaSql, dialect);
+        const report = validateFile(sql, file, schemaSql, dialect, dbt);
         results.push({ filename: file, report });
         totalIssues += report.errors.length + report.warnings.length;
     }
-    await core.summary
-        .addHeading('SafeSQL validation')
-        .addRaw('\n' + summaryTable(results) + '\n')
-        .write();
+    const summary = core.summary.addHeading('SafeSQL validation');
+    if (dbt)
+        summary.addRaw('\n' + dbtContextBanner(dbt.context) + '\n\n');
+    await summary.addRaw('\n' + summaryTable(results) + '\n').write();
     core.setOutput('issues_found', String(totalIssues));
     core.setOutput('files_checked', String(files.length));
     if (anyFailing(results, failOnWarnings)) {
@@ -68165,6 +69077,7 @@ async function runPrReview() {
     // warn   → comments posted, check stays green
     const blocking = (core.getInput('comment_mode') || 'block') !== 'warn';
     const schemaSql = schemaFile ? (0,external_node_fs_namespaceObject.readFileSync)(schemaFile, 'utf8') : undefined;
+    const dbt = loadDbtContext();
     const octokit = getOctokit(token);
     const { owner, repo } = github_context.repo;
     const changed = await octokit.paginate(octokit.rest.pulls.listFiles, {
@@ -68194,7 +69107,7 @@ async function runPrReview() {
             core.warning(`SafeSQL: could not read ${file.filename} from the workspace — skipped.`);
             continue;
         }
-        const report = validateSqlSource(sql, schemaSql, dialect);
+        const report = validateFile(sql, file.filename, schemaSql, dialect, dbt);
         results.push({ filename: file.filename, report });
         const issueCount = report.errors.length + report.warnings.length;
         totalIssues += issueCount;

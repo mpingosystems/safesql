@@ -6,6 +6,7 @@ import type {
   ValidateParams,
   ValidationResult,
   Verdict,
+  DbtContextSummary,
 } from './types';
 
 const DEFAULT_BASE_URL = 'https://safesqlpro.dev';
@@ -39,6 +40,7 @@ interface RawReport {
   tier?: string;
   detectorsRun?: string[];
   upgradePrompt?: string;
+  dbtContext?: unknown;
 }
 
 /**
@@ -87,6 +89,23 @@ export function toValidationResult(report: RawReport, threshold: number): Valida
     tier: typeof report.tier === 'string' ? report.tier : undefined,
     detectorsRun: Array.isArray(report.detectorsRun) ? report.detectorsRun : undefined,
     upgradePrompt: typeof report.upgradePrompt === 'string' ? report.upgradePrompt : undefined,
+    // Sprint 8 (dbt) — provenance passthrough, shape-checked so a malformed
+    // server response cannot leak an arbitrary object through the typed API.
+    dbtContext: toDbtContextSummary(report.dbtContext),
+  };
+}
+
+function toDbtContextSummary(raw: unknown): DbtContextSummary | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  const num = (v: unknown) => (typeof v === 'number' ? v : 0);
+  const artifacts = (r.artifacts && typeof r.artifacts === 'object' ? r.artifacts : {}) as Record<string, unknown>;
+  return {
+    models: num(r.models),
+    sources: num(r.sources),
+    sensitiveTagged: num(r.sensitiveTagged),
+    artifacts: { catalog: artifacts.catalog === true, runResults: artifacts.runResults === true },
+    warnings: Array.isArray(r.warnings) ? r.warnings.filter((w): w is string => typeof w === 'string') : [],
   };
 }
 
@@ -133,6 +152,7 @@ export class SafeSQLClient {
         sql: params.sql,
         ddl: params.ddl ?? '',
         dialect: params.dialect ?? 'postgresql',
+        ...(params.dbt ? { dbt: params.dbt } : {}),
       }),
       signal: params.signal,
     });

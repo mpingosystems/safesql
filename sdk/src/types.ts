@@ -38,6 +38,38 @@ export interface ValidationResult {
   detectorsRun?: string[];
   /** Present only when a narrowed tier withheld findings on this query. */
   upgradePrompt?: string;
+  /** Present only when `dbt` artifacts were sent. */
+  dbtContext?: DbtContextSummary;
+}
+
+/**
+ * Parsed dbt `target/` artifacts. `manifest` is required; the rest are optional.
+ * When supplied, the API derives the schema from catalog + manifest (PK/FK/
+ * nullable from the project's own tests) and runs the UNAPPROVED_SOURCE and
+ * FINANCE_TAG_UNVALIDATED detectors. Total request body is capped at 25 MB.
+ */
+export interface DbtArtifacts {
+  /** Parsed target/manifest.json (dbt manifest schema v10-v12). */
+  manifest: object;
+  /** Parsed target/catalog.json from `dbt docs generate`. */
+  catalog?: object;
+  /** Parsed target/run_results.json. */
+  runResults?: object;
+  /** Tags that mark a relation sensitive. Default ['finance', 'pii']. */
+  sensitiveTags?: string[];
+  /** dbt name of the model whose SQL this is; exempts a staging model reading its own source. */
+  currentModel?: string;
+}
+
+/** Provenance of the dbt context the API loaded — counts only, never the artifacts. */
+export interface DbtContextSummary {
+  models: number;
+  sources: number;
+  /** Relations carrying any configured sensitive tag. */
+  sensitiveTagged: number;
+  artifacts: { catalog: boolean; runResults: boolean };
+  /** Non-fatal artifact problems (unknown schema version, orphan catalog node). */
+  warnings: string[];
 }
 
 export interface ValidateParams {
@@ -48,6 +80,8 @@ export interface ValidateParams {
   threshold?: number;
   /** Abort the request early. */
   signal?: AbortSignal;
+  /** dbt artifacts — sent as the `dbt` body field only when present. */
+  dbt?: DbtArtifacts;
 }
 
 /** Minimal fetch shape, so the client works in Node, browsers and Workers. */

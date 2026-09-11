@@ -22,7 +22,17 @@ except ImportError:  # pragma: no cover
     sys.exit(2)
 
 # Reuse the shared pieces rather than re-implementing them.
-from validate_dbt import API_URL, DEFAULT_THRESHOLD, is_failing, score_of
+from validate_dbt import (
+    API_URL,
+    DEFAULT_THRESHOLD,
+    artifacts_banner,
+    build_request,
+    is_failing,
+    load_dbt_artifacts,
+    model_name_from_path,
+    score_of,
+    sensitive_tag_note,
+)
 
 # The blueprint's documented pre-commit args use --dialect=postgres, but the
 # engine's dialect ids are postgresql/mysql/bigquery/snowflake. Accept the
@@ -54,7 +64,14 @@ def validate_files(
     threshold: int = DEFAULT_THRESHOLD,
     warn_only: bool = False,
     schema_ddl: str = "",
+    target_dir: str = "",
 ) -> int:
+    # Sprint 8: explicit --target-dir only — no auto-discovery here, since
+    # this entry point is not project-scoped.
+    artifacts = load_dbt_artifacts(target_dir) if target_dir else None
+    if target_dir:
+        print(artifacts_banner(target_dir, artifacts))
+
     results = []
     for path in paths:
         path = os.path.normpath(path)
@@ -70,7 +87,7 @@ def validate_files(
             resp = requests.post(
                 API_URL,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"sql": sql, "ddl": schema_ddl, "dialect": dialect},
+                json=build_request(sql, dialect, schema_ddl, artifacts, model_name_from_path(path)),
                 timeout=30,
             )
             report = resp.json()
@@ -98,6 +115,9 @@ def validate_files(
             fix = i.get("fix")
             if fix:
                 print(f"       Fix: {fix}")
+            note = sensitive_tag_note(i)
+            if note:
+                print(f"       {note}")
     for r in results:
         if r not in failing:
             print(f"  OK {r['file']} (score: {score_of(r['report'])})")
@@ -117,6 +137,12 @@ def main() -> int:
     parser.add_argument("--dialect", type=normalize_dialect, default="postgresql")
     parser.add_argument("--api-key", default=os.environ.get("SAFESQL_API_KEY", ""))
     parser.add_argument("--schema-file", default="", help="optional DDL file for column resolution")
+    parser.add_argument(
+        "--target-dir",
+        default="",
+        help="dbt target/ directory with manifest.json; sends the artifacts instead of --schema-file. "
+        "For project-scoped validation use validate_dbt.py --target-dir instead.",
+    )
     parser.add_argument(
         "--threshold",
         type=int,
@@ -148,7 +174,7 @@ def main() -> int:
             return 2
 
     return validate_files(
-        args.files, args.api_key, args.dialect, args.threshold, args.warn_only, schema_ddl
+        args.files, args.api_key, args.dialect, args.threshold, args.warn_only, schema_ddl, args.target_dir
     )
 
 

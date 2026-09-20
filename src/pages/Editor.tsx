@@ -443,6 +443,7 @@ export function EditorPage() {
           )}
           <a href="#/settings" style={navLink}>Settings</a>
           <a href="#/how-to" style={navLink}>How To</a>
+          <a href="#/consulting" style={navLink}>Consulting</a>
           {appUser && appUser.plan !== 'free' && (
             <a href="#/team" style={navLink}>Team</a>
           )}

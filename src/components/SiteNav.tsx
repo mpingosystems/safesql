@@ -7,10 +7,11 @@ import { AuthControls } from './AuthControls';
 // was no nav link to mark active on the very pages a nav would help you leave.
 // One component, one active-state rule, used by all three.
 
-export type NavRoute = 'landing' | 'how-to' | 'benchmark' | 'pricing';
+export type NavRoute = 'landing' | 'how-to' | 'consulting' | 'benchmark' | 'pricing';
 
 const LINKS: Array<{ label: string; href: string; route: NavRoute }> = [
   { label: 'How To', href: '#/how-to', route: 'how-to' },
+  { label: 'Consulting', href: '#/consulting', route: 'consulting' },
   { label: 'Benchmark', href: '#/benchmark', route: 'benchmark' },
   { label: 'Pricing', href: '#/pricing', route: 'pricing' },
 ];
@@ -66,17 +67,21 @@ export function SiteNav({ current }: { current: NavRoute }) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-        <a
-          href={LINKS[0].href}
-          aria-current={current === LINKS[0].route ? 'page' : undefined}
-          style={linkStyle(current === LINKS[0].route)}
-        >
-          {LINKS[0].label}
-        </a>
+        {/* How To · Consulting sit before the editor CTA; Benchmark · Pricing after. */}
+        {LINKS.slice(0, 2).map((l) => (
+          <a
+            key={l.route}
+            href={l.href}
+            aria-current={current === l.route ? 'page' : undefined}
+            style={linkStyle(current === l.route)}
+          >
+            {l.label}
+          </a>
+        ))}
         <a href="#/editor" style={ctaButton}>
           Open Editor →
         </a>
-        {LINKS.slice(1).map((l) => (
+        {LINKS.slice(2).map((l) => (
           <a
             key={l.route}
             href={l.href}

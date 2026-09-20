@@ -14,6 +14,7 @@ import { AuditLogPage } from './pages/AuditLog';
 import { CustomRulesPage } from './pages/CustomRules';
 import { BenchmarkPage } from './pages/Benchmark';
 import { HowToPage } from './pages/HowTo';
+import { ConsultingPage } from './pages/Consulting';
 import { AcceptInvitePage } from './pages/AcceptInvite';
 import { TeamPage } from './pages/Team';
 import { BlogPage } from './pages/Blog';
@@ -31,7 +32,7 @@ type Route =
   | 'landing' | 'editor' | 'pricing' | 'share' | 'analytics' | 'settings'
   | 'team-analytics' | 'team-approvals' | 'team-audit' | 'compliance' | 'team-rules' | 'blog'
   | 'team-setup' | 'team-members' | 'team-join' | 'library' | 'launch'
-  | 'privacy' | 'terms' | 'security' | 'dpa' | 'sub-processors' | 'benchmark' | 'how-to' | 'accept-invite' | 'team';
+  | 'privacy' | 'terms' | 'security' | 'dpa' | 'sub-processors' | 'benchmark' | 'how-to' | 'consulting' | 'accept-invite' | 'team';
 
 function routeFromLocation(): Route {
   // New short-URL permalink is a real path: /v/{id} (served via _redirects SPA
@@ -58,6 +59,7 @@ function routeFromLocation(): Route {
   if (h.startsWith('/compliance')) return 'compliance';
   if (h.startsWith('/accept-invite')) return 'accept-invite';
   if (h.startsWith('/how-to')) return 'how-to';
+  if (h.startsWith('/consulting')) return 'consulting';
   if (h.startsWith('/benchmark')) return 'benchmark';
   if (h.startsWith('/blog')) return 'blog';
   if (h.startsWith('/analytics')) return 'analytics';
@@ -133,6 +135,8 @@ function App() {
       return <AcceptInvitePage />;
     case 'how-to':
       return <HowToPage />;
+    case 'consulting':
+      return <ConsultingPage />;
     case 'benchmark':
       return <BenchmarkPage />;
     case 'blog':

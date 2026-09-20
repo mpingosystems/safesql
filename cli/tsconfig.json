@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["index.ts", "../src/services/fileValidation.ts", "../src/services/sqlValidator.ts", "../src/services/schemaParser.ts", "../src/types/validation.ts"]
+  "include": ["index.ts", "batchScan.ts", "dbtTarget.ts", "../src/services/fileValidation.ts", "../src/services/issueLocator.ts", "../src/services/dbtArtifacts.ts", "../src/config/detectorTiers.ts", "../src/config/detectorVersion.ts", "../src/services/sqlValidator.ts", "../src/services/schemaParser.ts", "../src/types/validation.ts"]
 }

@@ -3,6 +3,7 @@ import type { Env } from '../../../_shared';
 import { admin, callerId, jsonRes, membershipOf, type Team, type TeamRole } from '../_shared';
 import type { AuditEventRow, AuditEventType } from '../../../../src/services/auditChain';
 import { AUDIT_EVENT_TYPES } from '../../../../src/services/auditChain';
+import { API_KEY_PREFIX, hashApiKey } from '../../../../src/services/apiKeys';
 
 // Sprint 9 (compliance tier) — shared pieces for the evidence routes.
 //
@@ -22,16 +23,73 @@ export interface EvidenceAccess {
   clerkUserId: string;
 }
 
+// Sprint 9.5A-post — the evidence routes accept a SafeSQL Pro API key as well
+// as a Clerk session, so `safesql scan --sign` can generate and download a
+// bundle from CI. The key resolves to its owner (api_keys → users, same lookup
+// as POST /api/validate, revoked keys rejected) and from there to the owner's
+// team membership; plan gating and the role rules are then identical to the
+// browser path. `deps` exists for tests only — production call sites pass
+// (request, env) and get the real client and verifier.
+
+export interface EvidenceAccessDeps {
+  db?: SupabaseClient;
+  verifyJwt?: (request: Request, env: Env) => Promise<string | null>;
+}
+
+export const API_KEY_NO_TEAM_ERROR = 'API key owner is not a member of any team';
+
+function bearerToken(request: Request): string | null {
+  const h = request.headers.get('Authorization') ?? '';
+  const m = /^Bearer\s+(.+)$/i.exec(h.trim());
+  return m ? m[1].trim() : null;
+}
+
+/** The Clerk user id that owns a live API key, or null (unknown or revoked). */
+async function apiKeyOwner(db: SupabaseClient, token: string): Promise<string | null> {
+  const keyHash = await hashApiKey(token);
+  const { data } = await db
+    .from('api_keys')
+    .select('user_id, revoked_at, users!inner(plan, clerk_user_id)')
+    .eq('key_hash', keyHash)
+    .maybeSingle();
+  if (!data || data.revoked_at) return null;
+  type U = { plan?: string; clerk_user_id?: string };
+  const embedded = (data as { users?: U | U[] }).users;
+  const user = Array.isArray(embedded) ? embedded[0] : embedded;
+  return user?.clerk_user_id ?? null;
+}
+
 /**
- * Verify the Clerk JWT, resolve the caller's team, and gate on plan.
+ * Resolve the caller — API key first (`Bearer ssk_live_…`), else Clerk JWT —
+ * then the caller's team, and gate on plan.
  * Returns a Response (401 / 404 / 402) when access is denied.
  */
-export async function requireEvidenceAccess(request: Request, env: Env): Promise<EvidenceAccess | Response> {
-  const clerkUserId = await callerId(request, env);
-  if (!clerkUserId) return jsonRes({ error: 'Unauthorized' }, 401);
-  const db = admin(env);
+export async function requireEvidenceAccess(
+  request: Request,
+  env: Env,
+  deps: EvidenceAccessDeps = {},
+): Promise<EvidenceAccess | Response> {
+  const token = bearerToken(request);
+  const viaApiKey = token !== null && token.startsWith(API_KEY_PREFIX);
+  const db = deps.db ?? admin(env);
+
+  let clerkUserId: string | null;
+  if (viaApiKey) {
+    clerkUserId = await apiKeyOwner(db, token);
+    if (!clerkUserId) return jsonRes({ error: 'Unauthorized' }, 401);
+  } else {
+    clerkUserId = await (deps.verifyJwt ?? callerId)(request, env);
+    if (!clerkUserId) return jsonRes({ error: 'Unauthorized' }, 401);
+  }
+
   const membership = await membershipOf(db, clerkUserId);
-  if (!membership) return jsonRes({ error: 'You are not a member of a team' }, 404);
+  if (!membership) {
+    // A key with no team is an auth failure for a machine caller (401), while
+    // a signed-in person with no team is a state the UI explains (404).
+    return viaApiKey
+      ? jsonRes({ error: API_KEY_NO_TEAM_ERROR }, 401)
+      : jsonRes({ error: 'You are not a member of a team' }, 404);
+  }
   if (!EVIDENCE_PLANS.has(membership.team.plan)) {
     return jsonRes(
       {

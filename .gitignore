@@ -16,6 +16,10 @@ dist-ssr
 .env.production
 .env.production.local
 
+# Local pointer to the private working-context folder (read by scripts/state.mjs).
+# Never commit it: the path is private.
+.safesql-internal-path
+
 # Sprint working backups (created during in-progress edits, not for commit)
 *.sprint*-baseline
 

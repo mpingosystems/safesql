@@ -4,7 +4,7 @@
 // VITE_API_BASE_URL to route calls through a different origin — currently the
 // canonical https://safesql.pages.dev deployment, where POST /api/* works while
 // the safesqlpro.dev custom-domain edge returns a bare 502 on POST (an edge-rule
-// issue tracked in realitydb-internal/05-safesql/CHECKOUT-502-HANDOFF.md).
+// issue; see docs/502-investigation.md).
 //
 // Cross-origin use requires the target Function to send CORS headers + handle
 // OPTIONS. Only route endpoints that do (checkout, portal, digest, validate,

@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "postbuild": "node scripts/check-bundle-secrets.mjs dist",
     "check:bundle-secrets": "node scripts/check-bundle-secrets.mjs dist",
+    "check:leaks": "node scripts/check-leaks.mjs",
+    "state": "node scripts/state.mjs --print",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

@@ -44,6 +44,9 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Leak check (no private working context in the repo)
+        run: npm run check:leaks
+
       - name: Typecheck (app)
         run: npx tsc -b
 

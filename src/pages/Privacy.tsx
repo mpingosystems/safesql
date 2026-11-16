@@ -65,6 +65,11 @@ export function PrivacyPage() {
           We do not sell your personal information to third parties. We do not use your SQL queries
           or schemas to train AI models. We do not share your data with advertisers.
         </P>
+        <P>
+          If you turn on AI explanations (Pro, Team and Business plans), part of your query and your
+          schema's table and column names are sent to Anthropic to generate the explanation. See
+          Security §4.
+        </P>
       </LegalSection>
 
       <LegalSection title="3 — Data storage and security">
@@ -123,7 +128,7 @@ export function PrivacyPage() {
             ['Cloudflare', 'CDN, Workers, Pages', 'Global'],
             ['Stripe', 'Payment processing', 'USA'],
             ['Resend', 'Transactional email', 'USA'],
-            ['Anthropic', 'AI explanations (Pro tier)', 'USA'],
+            ['Anthropic', 'AI explanations (Pro, Team and Business plans, when turned on)', 'USA'],
           ]}
         />
         <P>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   SchemaDefinition,
   SqlSource,
@@ -18,7 +18,9 @@ import {
   type PlanTier,
 } from '../config/detectorTiers';
 import { parseDDL } from '../services/schemaParser';
-import { enrichWithAIExplanations } from '../services/aiExplainer';
+import { enrichWithAIExplanations, AI_UNAVAILABLE_NOTE } from '../services/aiExplainer';
+import { runEditorValidation, type AiStatus, type EditorValidationMeta, type ExplainFn } from '../services/editorValidation';
+import { useSessionToken } from '../hooks/useSessionToken';
 import { persistValidation } from '../services/persistValidation';
 import { applyFix, canApplyFix } from '../services/applyFix';
 import { AuthControls } from '../components/AuthControls';
@@ -227,6 +229,18 @@ export function EditorPage() {
   // visitors are treated as free.
   const tier: PlanTier = isPro ? (appUser!.plan as PlanTier) : 'free';
 
+  // 9.6-SEC — AI explanations are Pro+ (matches the pricing page). The server
+  // enforces it from users.plan. The UI only reflects it: free and signed-out
+  // users see the toggle locked with an upgrade link.
+  const aiAllowed = isPro;
+  const aiActive = aiAllowed && aiEnabled;
+  const [aiStatus, setAiStatus] = useState<AiStatus>('off');
+  const getSessionToken = useSessionToken();
+  const explain = useMemo<ExplainFn | undefined>(
+    () => (aiActive ? (r, s, sch) => enrichWithAIExplanations(r, s, sch, getSessionToken) : undefined),
+    [aiActive, getSessionToken],
+  );
+
   // Sprint 10 — request approval for a risky query (team users only).
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [approvalNote, setApprovalNote] = useState('');
@@ -261,29 +275,15 @@ export function EditorPage() {
     setTimeout(() => { setApprovalOpen(false); setApprovalMsg(null); }, 1600);
   }, [appUser, report, sql, ddl, dialect, approvalNote]);
 
-  const runValidation = useCallback(async () => {
-    if (overLimit) return; // hard block when free-tier limit reached
-
-    // Clear stale results BEFORE running the new pass so the panel doesn't
-    // briefly show last validation's errors against this validation's SQL.
-    setReport(null);
-
-    let next = validateSQL({ sql, schema: schema ?? undefined, dialect, source, tier, customRules });
-    setReport(next);
-    setLastValidatedAt(new Date());
-
-    if (aiEnabled && (next.errors.length > 0 || next.warnings.length > 0)) {
-      const enriched = await enrichWithAIExplanations(next, sql, schema ?? undefined);
-      setReport({ ...enriched });
-      next = enriched;
-    }
-
-    // Fire-and-forget persistence (no await on the validate path).
-    if (appUser?.id) {
+  // The single persist point for a completed validation (button or Ctrl+S).
+  // Fire-and-forget: there's no await on the validate path.
+  const persistFinal = useCallback(
+    (final: Report, sqlText: string) => {
+      if (!appUser?.id || overLimit) return;
       void persistValidation({
         appUserId: appUser.id,
-        sql,
-        report: next,
+        sql: sqlText,
+        report: final,
         schemaId: activeSchemaId ?? undefined,
         dialect,
         detectorVersion: DETECTOR_VERSION,
@@ -291,8 +291,46 @@ export function EditorPage() {
       }).then((ok) => {
         if (ok) void refreshAppUser(); // pull updated count
       });
-    }
-  }, [sql, schema, dialect, source, tier, customRules, aiEnabled, appUser, activeSchemaId, refreshAppUser, overLimit]);
+    },
+    [appUser, overLimit, activeSchemaId, dialect, tier, refreshAppUser],
+  );
+
+  const showInterim = useCallback((interim: Report) => {
+    setReport(interim);
+    setLastValidatedAt(new Date());
+  }, []);
+
+  const completeValidation = useCallback(
+    (final: Report, meta: EditorValidationMeta) => {
+      setReport({ ...final });
+      setLastValidatedAt(new Date());
+      setAiStatus(meta.aiStatus);
+      persistFinal(final, meta.sql);
+    },
+    [persistFinal],
+  );
+
+  const runValidation = useCallback(async () => {
+    if (overLimit) return; // hard block when free-tier limit reached
+
+    // Clear stale results BEFORE running the new pass so the panel doesn't
+    // briefly show last validation's errors against this validation's SQL.
+    setReport(null);
+    setAiStatus('off');
+
+    const result = await runEditorValidation({
+      sql,
+      schema: schema ?? undefined,
+      dialect,
+      source,
+      tier,
+      customRules,
+      blocked: overLimit,
+      explain,
+      onInterim: showInterim,
+    });
+    if (result) completeValidation(result.report, { sql: result.sql, aiStatus: result.aiStatus });
+  }, [sql, schema, dialect, source, tier, customRules, explain, overLimit, showInterim, completeValidation]);
 
   // PQ4 — apply a mechanical fix, rewrite the editor, and re-validate.
   const handleApplyFix = useCallback(
@@ -302,6 +340,7 @@ export function EditorPage() {
       setSql(next);
       const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source, tier, customRules });
       setReport(nextReport);
+      setAiStatus('off');
       setLastValidatedAt(new Date());
       if (appUser?.id && !overLimit) {
         void persistValidation({
@@ -334,6 +373,7 @@ export function EditorPage() {
     setSql(next);
     const nextReport = validateSQL({ sql: next, schema: schema ?? undefined, dialect, source, tier, customRules });
     setReport(nextReport);
+    setAiStatus('off');
     setLastValidatedAt(new Date());
     if (appUser?.id && !overLimit) {
       void persistValidation({
@@ -349,24 +389,6 @@ export function EditorPage() {
       });
     }
   }, [report, sql, schema, dialect, source, tier, customRules, appUser, overLimit, activeSchemaId, refreshAppUser]);
-
-  const handleValidationFromEditor = (next: Report) => {
-    setReport(next);
-    setLastValidatedAt(new Date());
-    if (appUser?.id && !overLimit) {
-      void persistValidation({
-        appUserId: appUser.id,
-        sql,
-        report: next,
-        schemaId: activeSchemaId ?? undefined,
-        dialect,
-        detectorVersion: DETECTOR_VERSION,
-        tier,
-      }).then((ok) => {
-        if (ok) void refreshAppUser();
-      });
-    }
-  };
 
   const handleClear = useCallback(() => {
     setSql('');
@@ -417,7 +439,7 @@ export function EditorPage() {
           >
             SafeSQL Pro
           </a>
-          <span style={{ color: '#52525b', fontSize: 11 }}>v0.8.0</span>
+          <span style={{ color: '#52525b', fontSize: 11 }}>v0.11.1</span>
           {appUser && (
             <UsageMeter
               count={appUser.validations_this_month}
@@ -579,12 +601,16 @@ export function EditorPage() {
           <SqlEditor
             value={sql}
             onChange={setSql}
-            onValidate={handleValidationFromEditor}
-            onValidateStart={() => setReport(null)}
+            onValidate={completeValidation}
+            onInterimReport={showInterim}
+            onValidateStart={() => { setReport(null); setAiStatus('off'); }}
             schema={schema ?? undefined}
             dialect={dialect}
             source={source}
-            aiEnabled={aiEnabled}
+            tier={tier}
+            customRules={customRules}
+            blocked={overLimit}
+            explain={explain}
             clearSignal={clearSignal}
           />
         </div>
@@ -653,6 +679,11 @@ export function EditorPage() {
             </a>
           </div>
         )}
+        {report && aiStatus === 'unavailable' && (
+          <div role="status" style={{ padding: '6px 12px', fontSize: 11.5, color: '#71717a' }}>
+            {AI_UNAVAILABLE_NOTE}
+          </div>
+        )}
         <ValidationReport
           report={report}
           sql={sql}
@@ -697,14 +728,29 @@ export function EditorPage() {
             : 'Not yet validated'}
           {report && ` · ${report.processingMs.toFixed(0)}ms`}
         </div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
-          <input
-            type="checkbox"
-            checked={aiEnabled}
-            onChange={(e) => setAiEnabled(e.target.checked)}
-          />
-          AI explanations: {aiEnabled ? 'on' : 'off'}
-        </label>
+        {aiAllowed ? (
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={aiEnabled}
+              onChange={(e) => setAiEnabled(e.target.checked)}
+            />
+            AI explanations: {aiEnabled ? 'on' : 'off'}
+          </label>
+        ) : (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label
+              title="AI explanations are included with Pro"
+              style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'not-allowed', opacity: 0.6 }}
+            >
+              <input type="checkbox" checked={false} disabled aria-describedby="ai-upgrade" />
+              AI explanations: Pro
+            </label>
+            <a id="ai-upgrade" href="#/pricing" style={{ color: '#a78bfa', fontWeight: 600, textDecoration: 'none' }}>
+              Upgrade to Pro
+            </a>
+          </span>
+        )}
       </footer>
 
       {approvalOpen && (

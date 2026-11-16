@@ -16,7 +16,7 @@ export function SubProcessorsPage() {
           ['Cloudflare Inc.', 'CDN, Workers, Pages', 'USA/Global', link('https://cloudflare.com', 'cloudflare.com'), 'Request metadata, validation processing'],
           ['Stripe Inc.', 'Payment processing', 'USA', link('https://stripe.com', 'stripe.com'), 'Billing details, subscription status'],
           ['Resend Inc.', 'Transactional email', 'USA', link('https://resend.com', 'resend.com'), 'Email address, message content'],
-          ['Anthropic PBC', 'AI explanations (Pro+)', 'USA', link('https://anthropic.com', 'anthropic.com'), 'Detected issue + minimal context (not full queries)'],
+          ['Anthropic PBC', 'AI explanations (Pro, Team and Business plans) and drafting custom rules from a plain-English description (the description only, never SQL)', 'USA', link('https://anthropic.com', 'anthropic.com'), 'Detected issues, the first 2,000 characters of the query, and schema table and column names. Sent only when a Pro, Team or Business user turns on AI explanations. Not stored or logged by SafeSQL Pro.'],
         ]}
       />
       <P>

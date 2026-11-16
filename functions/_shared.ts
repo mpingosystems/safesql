@@ -28,6 +28,9 @@ export interface Env {
   // ── Email (Resend) — all email is skipped gracefully if unset ────────
   RESEND_API_KEY?: string;
   RESEND_FROM?: string;
+  // ── Anthropic (Layer 2 only) — server secret, set with
+  // `wrangler pages secret put ANTHROPIC_API_KEY`. Never a VITE_ variable. ──
+  ANTHROPIC_API_KEY?: string;
   // ── RealityDB SimLab ─────────────────────────────────────────────────
   REALITYDB_LAB_API_BASE?: string;
   REALITYDB_LAB_API_KEY?: string;

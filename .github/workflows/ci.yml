@@ -1,0 +1,63 @@
+name: CI
+
+# Typecheck, tests and a production build on every push and PR to main.
+# The build runs the postbuild secret scan over dist/, so a secret that reaches
+# the browser bundle fails CI.
+#
+# No secrets are used here. The build needs no VITE_ values to compile, and the
+# publishable ones below are inert placeholders: they only prove the bundle
+# builds with every browser-side variable set. Real values never belong in CI.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_CLERK_PUBLISHABLE_KEY: pk_test_placeholder-not-a-key
+      VITE_SUPABASE_URL: https://placeholder.supabase.co
+      VITE_SUPABASE_ANON_KEY: placeholder-anon-key
+      VITE_STRIPE_PUBLISHABLE_KEY: pk_test_placeholder-not-a-key
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck (app)
+        run: npx tsc -b
+
+      - name: Typecheck (Functions)
+        run: npx tsc -p functions/tsconfig.json --noEmit
+
+      - name: Vitest
+        run: npm test
+
+      - name: Pytest (dbt-safesql)
+        working-directory: dbt-safesql
+        run: |
+          python -m pip install --disable-pip-version-check pytest requests pyyaml
+          python -m pytest -q
+
+      - name: Build + bundle secret scan
+        run: npm run build

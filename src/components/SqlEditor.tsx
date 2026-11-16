@@ -1,14 +1,16 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type { editor } from 'monaco-editor';
 import type {
+  CustomRule,
   SchemaDefinition,
   SqlSource,
   ValidationIssue,
   ValidationReport,
 } from '../types/validation';
+import type { PlanTier } from '../config/detectorTiers';
 import { validateSQL } from '../services/sqlValidator';
-import { enrichWithAIExplanations } from '../services/aiExplainer';
+import { validateFromEditor, type EditorValidationMeta, type ExplainFn } from '../services/editorValidation';
 import { locateIssue } from '../services/issueLocator';
 
 type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
@@ -16,12 +18,21 @@ type Dialect = 'postgresql' | 'mysql' | 'bigquery' | 'snowflake';
 export interface SqlEditorProps {
   value: string;
   onChange: (next: string) => void;
-  onValidate: (report: ValidationReport) => void;
+  // Fires exactly once per Ctrl+S validation, with the final report. Persist here.
+  onValidate: (report: ValidationReport, meta: EditorValidationMeta) => void;
+  // Fires before AI enrichment with the deterministic report (display only).
+  onInterimReport?: (report: ValidationReport) => void;
   onValidateStart?: () => void;
   schema?: SchemaDefinition;
   dialect?: Dialect;
   source?: SqlSource;
-  aiEnabled?: boolean;
+  // 9.6-SEC: Ctrl+S honors the same tier, custom rules, limit and AI
+  // entitlement as the Validate button. Omitting tier runs the full detector
+  // set, which only the Landing demo does.
+  tier?: PlanTier;
+  customRules?: CustomRule[];
+  blocked?: boolean;
+  explain?: ExplainFn;
   height?: string | number;
   clearSignal?: number;
 }
@@ -33,21 +44,16 @@ const SEVERITY_TO_MARKER: Record<ValidationIssue['severity'], number> = {
 };
 
 export function SqlEditor(props: SqlEditorProps) {
-  const {
-    value,
-    onChange,
-    onValidate,
-    onValidateStart,
-    schema,
-    dialect = 'postgresql',
-    source,
-    aiEnabled = false,
-    height = '100%',
-    clearSignal,
-  } = props;
+  const { value, onChange, height = '100%', clearSignal } = props;
 
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof import('monaco-editor') | null>(null);
+  // The Ctrl+S command is registered once, on mount. Reading props through this
+  // ref keeps it from running with the first render's tier, AI or limit state.
+  const propsRef = useRef(props);
+  useLayoutEffect(() => {
+    propsRef.current = props;
+  });
 
   const clearMarkers = () => {
     const ed = editorRef.current;
@@ -59,20 +65,26 @@ export function SqlEditor(props: SqlEditorProps) {
   const runValidation = async () => {
     const ed = editorRef.current;
     if (!ed) return;
-    const sql = ed.getValue();
-
-    onValidateStart?.();
-    clearMarkers();
-
-    let report = validateSQL({ sql, schema, dialect, source });
-    onValidate(report);
-
-    applyMarkers(report);
-
-    if (aiEnabled && (report.errors.length > 0 || report.warnings.length > 0)) {
-      const enriched = await enrichWithAIExplanations(report, sql, schema);
-      onValidate(enriched);
-    }
+    const p = propsRef.current;
+    await validateFromEditor(
+      {
+        sql: ed.getValue(),
+        schema: p.schema,
+        dialect: p.dialect ?? 'postgresql',
+        source: p.source,
+        tier: p.tier,
+        customRules: p.customRules,
+        blocked: p.blocked,
+        explain: p.explain,
+      },
+      {
+        onValidateStart: p.onValidateStart,
+        onInterimReport: p.onInterimReport,
+        onValidate: p.onValidate,
+        clearMarkers,
+        applyMarkers,
+      },
+    );
   };
 
   const applyMarkers = (report: ValidationReport) => {

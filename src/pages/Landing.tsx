@@ -215,6 +215,10 @@ export function LandingPage() {
                   </div>
                 }
               >
+                {/* Landing demo, intentionally unchanged by 9.6-SEC: no tier is
+                    passed, so Ctrl+S runs the full detector set as a showcase,
+                    and no `explain` is passed, so there is never an AI call. It
+                    persists nothing and counts against no limit. */}
                 <SqlEditor
                   value={demoSql}
                   onChange={setDemoSql}

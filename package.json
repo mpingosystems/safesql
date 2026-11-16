@@ -1,11 +1,13 @@
 {
   "name": "safesql",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.11.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "postbuild": "node scripts/check-bundle-secrets.mjs dist",
+    "check:bundle-secrets": "node scripts/check-bundle-secrets.mjs dist",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

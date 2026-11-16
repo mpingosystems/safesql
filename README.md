@@ -51,8 +51,6 @@ Build-time (`.env.local`, inlined into the JS bundle by Vite):
 
 | Var | Required | Purpose |
 |---|---|---|
-| `VITE_ANTHROPIC_API_KEY` | for AI explanations | Direct browser → Anthropic. Set spending caps in Anthropic dashboard. |
-| `VITE_AI_PROVIDER` | optional | Default `claude`. |
 | `VITE_CLERK_PUBLISHABLE_KEY` | for auth | `pk_test_...` or `pk_live_...`. |
 | `VITE_SUPABASE_URL` | for persistence | Project URL. |
 | `VITE_SUPABASE_ANON_KEY` | for persistence | Anon key — RLS-protected. |
@@ -70,6 +68,9 @@ Runtime, Pages env (set via `wrangler pages secret put` or dashboard — never i
 | `SUPABASE_URL` | webhook (REST writes via service-role) |
 | `SUPABASE_SERVICE_ROLE_KEY` | webhook |
 | `SITE_URL` | `/api/checkout` (Stripe success/cancel URLs). Defaults to `https://safesql.dev`. |
+| `ANTHROPIC_API_KEY` | `/api/explain` (editor AI explanations, Pro+) and `/api/rules/suggest`. Server-side only; there is no browser-side AI call. |
+
+`npm run build` runs a secret scan over `dist/` (`scripts/check-bundle-secrets.mjs`) and fails if any secret pattern reaches the bundle.
 
 ## Deployment
 

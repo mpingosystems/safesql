@@ -67,7 +67,7 @@ export function DPAPage() {
             ['Cloudflare Inc.', 'USA/Global', 'Infrastructure'],
             ['Stripe Inc.', 'USA', 'Payment processing'],
             ['Resend Inc.', 'USA', 'Email delivery'],
-            ['Anthropic PBC', 'USA', 'AI explanations (Pro+)'],
+            ['Anthropic PBC', 'USA', 'AI explanations (Pro, Team and Business plans) and drafting custom rules from a plain-English description (the description only, never SQL)'],
           ]}
         />
         <P>

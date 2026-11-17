@@ -14,7 +14,7 @@ It prints version, branch, sync with origin and recent commits. If a working-con
 
 - `npm test`: vitest, the whole suite. Gate commits on its own exit code.
 - `python -m pytest -q` in `dbt-safesql/`: the Python package.
-- `npm run check:leaks`: fails if a tracked file refers to private working context. Output names file and line only.
+- `npm run check:leaks`: fails if a tracked file refers to private working context. Output names file and line only. The denylist is HMAC-keyed: the key comes from `LEAK_CHECK_KEY`, a file named by `LEAK_CHECK_KEY_FILE`, or the gitignored `.leak-check-key-path`. Without a key it fails in CI and prints `SKIPPED, NOT RUN` locally; never print the key.
 - `npm run build`: typecheck + bundle; `postbuild` runs the bundle secret scan and must report `0 findings`.
 
 `npm run lint` has pre-existing `no-explicit-any` errors; it is not a gate.

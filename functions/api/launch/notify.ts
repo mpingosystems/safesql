@@ -80,7 +80,7 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<NotifyEn
     { headers: supabaseHeaders(env) },
   );
   if (!listRes.ok) {
-    return error(502, 'Could not read subscribers.', { detail: await listRes.text() });
+    return error(503, 'Could not read subscribers.', { detail: await listRes.text() });
   }
   const subs = (await listRes.json()) as { id: string; email: string }[];
 

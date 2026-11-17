@@ -91,7 +91,7 @@ export async function handleSchemaSync(request: Request, deps: SchemaSyncDeps): 
   try {
     schema = await deps.fetchSchema(conn.dialect, config);
   } catch (e) {
-    return jsonRes({ error: `Connection failed: ${(e as Error).message}` }, 502);
+    return jsonRes({ error: `Connection failed: ${(e as Error).message}` }, 503);
   }
 
   if (body.test !== true) {

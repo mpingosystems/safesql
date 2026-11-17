@@ -51,7 +51,7 @@ export const onRequestPost = async (context: { request: Request }): Promise<Resp
   const ok = httpStatus >= 200 && httpStatus < 300;
 
   return new Response(JSON.stringify({ status: ok ? 'delivered' : 'failed', http_status: httpStatus }), {
-    status: ok ? 200 : 502,
+    status: ok ? 200 : 503,
     headers: { 'content-type': 'application/json', ...cors },
   });
 };

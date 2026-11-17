@@ -20,7 +20,7 @@ import {
 // validator logic is NOT duplicated here — this only reads files, formats
 // output, and sets the exit code.
 
-const CLI_VERSION = '0.11.1';
+const CLI_VERSION = '0.11.2';
 const program = new Command();
 
 program

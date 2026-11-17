@@ -4,9 +4,12 @@ name: CI
 # The build runs the postbuild secret scan over dist/, so a secret that reaches
 # the browser bundle fails CI.
 #
-# No secrets are used here. The build needs no VITE_ values to compile, and the
-# publishable ones below are inert placeholders: they only prove the bundle
-# builds with every browser-side variable set. Real values never belong in CI.
+# One secret is used: LEAK_CHECK_KEY, the HMAC key for the leak guard's denylist,
+# passed only to the leak-check and Vitest steps. Pull requests from forks don't
+# receive it, so their leak check fails (by design: it never passes without the
+# key). The build needs no VITE_ values to compile, and the publishable ones
+# below are inert placeholders: they only prove the bundle builds with every
+# browser-side variable set. Real values never belong in CI.
 on:
   push:
     branches: [main]
@@ -46,6 +49,8 @@ jobs:
 
       - name: Leak check (no private working context in the repo)
         run: npm run check:leaks
+        env:
+          LEAK_CHECK_KEY: ${{ secrets.LEAK_CHECK_KEY }}
 
       - name: Typecheck (app)
         run: npx tsc -b
@@ -55,6 +60,8 @@ jobs:
 
       - name: Vitest
         run: npm test
+        env:
+          LEAK_CHECK_KEY: ${{ secrets.LEAK_CHECK_KEY }}
 
       - name: Pytest (dbt-safesql)
         working-directory: dbt-safesql

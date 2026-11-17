@@ -1,68 +1,60 @@
-# safesqlpro.dev POST `/api/*` → 502 — Investigation
+# safesqlpro.dev `/api/*` → bare 502: investigation (resolved)
 
-Custom-domain `safesqlpro.dev` returns a **bare Cloudflare 502** for some POSTs to
-Pages Functions, while the **canonical `safesql.pages.dev` works identically**.
-Active workaround: `VITE_API_BASE_URL=https://safesql.pages.dev` routes checkout /
-portal at the canonical origin. **Do not remove the workaround until fixed.**
+**Status: resolved 2026-11-16.** The bare `error code: 502` on the custom domain
+was never the request failing. It was the zone replacing a **502 status that our
+own Function returned** with Cloudflare's own error page. `safesql.pages.dev`
+passes the Function's response through unchanged; the `safesqlpro.dev` zone does
+not. The earlier conclusion recorded here ("a POST whose Function makes an
+outbound `fetch()` is killed at the edge") was wrong; the corrected finding and
+the evidence are below.
 
-## Exact behaviour (measured)
+## Corrected finding (2026-11-16, same request against both origins)
 
 | Request | `safesqlpro.dev` | `safesql.pages.dev` |
 |---|---|---|
-| `OPTIONS /api/checkout` | **204** (our preflight) | 204 |
-| `GET /api/checkout` | **405** (our `methodNotAllowed`) | 405 |
-| `POST /api/checkout` `{priceId:"INVALID"}` (400 **before** any outbound fetch) | **200/400 — our JSON** ✓ | our JSON |
-| `POST /api/stripe/webhook` no-signature (400 **before** any outbound fetch) | **our JSON 400** ✓ | our JSON 400 |
-| `POST /api/checkout` `{priceId:"price_…"}` (→ Worker fetches `api.stripe.com`) | **`error code: 502`** (text/plain, no CORS header) ✗ | our JSON / `cs_live_…` ✓ |
+| `POST /api/checkout` `{priceId:"price_probe_does_not_exist"}` (Stripe answers 400 → Function returns **502** JSON) | `502` `text/plain` `error code: 502`, no CORS header (4 of 4 runs) | `502` `application/json` `{"error":"Stripe API error","stripeStatus":400,...}` |
+| `POST /api/validate` with a fake API key (Function makes a Supabase subrequest, returns 401) | `401` `application/json` (our JSON) | `401` `application/json` |
+| `POST /api/teams/events` with a malformed JWT (Function fetches the Clerk JWKS, returns 401) | `401` `application/json` (our JSON) | `401` `application/json` |
+| `POST /api/checkout` with the real Pro price ID (Stripe subrequest succeeds) | `200` `application/json`, body holds a `cs_live_` session on `checkout.stripe.com` | — |
 
-**Decisive finding:** the split is **not** by HTTP method. A POST that returns
-*without making an outbound subrequest* works on `safesqlpro.dev`; a POST whose
-Function makes an **outbound `fetch()`** (to `api.stripe.com` / Supabase) is killed
-at the edge → bare 502. The identical outbound call succeeds on `pages.dev`.
+POSTs that make outbound subrequests work on the custom domain. Only a Function
+response with status **502** comes back as a bare page, and only on the custom
+domain. A Cloudflare zone shows its own error page for origin 502 and 504
+responses unless "origin error page pass-through" is enabled, a setting that is
+Enterprise-only. `*.pages.dev` is not served through that zone, so it passes the
+response through.
 
-Our handler wraps the fetch in `try/catch` + a 10s `AbortController`; neither fires —
-the request is terminated by the edge **before** the Function can return. So this is
-a property of how `safesqlpro.dev`'s custom-domain path handles a Function that
-awaits a subrequest, independent of method, body, or our code.
+The original symptom (real-price checkout failing on the custom domain) fits the
+same mechanism: any Stripe error made `checkout.ts` return 502, and the zone
+turned that into a bare page with no JSON body and no CORS headers.
 
-## Eliminated hypotheses (with evidence)
+## Fix
 
-- **WAF / firewall rules** — confirmed empty; and a no-outbound POST works, so no
-  method/path block.
-- **Transform / Configuration rules** — confirmed empty.
-- **Worker routes on the zone** — `wrangler … workers_list` → **0 Workers**; nothing
-  intercepts `/api/*`.
-- **CORS / missing OPTIONS** — OPTIONS returns 204; same-origin POST never preflights;
-  adding CORS/OPTIONS handlers did not change the 502.
-- **Node SDK / Buffer** — no `stripe-node`; functions are raw `fetch` + Web Crypto.
-- **Stale bundle / wrong price IDs** — reproduced with `curl` against current deploy;
-  `pages.dev` returns `cs_live_…` for the same request.
-- **Missing env vars** — `STRIPE_SECRET_KEY` valid (Stripe authenticates on pages.dev).
-- **`_headers` / `_redirects` / `_routes.json`** — reviewed: cache rules only; the
-  only redirect is a host-qualified 301 from `safesql.realitydb.dev` (does not touch
-  `safesqlpro.dev`); `_routes.json` correctly `include: ["/api/*"]`. No wrangler.toml.
+- **Functions never return 502 or 504 from code.** Upstream failures (Stripe,
+  Supabase, warehouse connections, outbound webhooks) return **503** with a JSON
+  body. A static test (`cli/functionsNoGatewayStatus.test.ts`) fails if a
+  502 or 504 status appears anywhere under `functions/`.
+- **The cross-origin workaround is removed.** The browser used to send `/api/*`
+  calls to `https://safesql.pages.dev` through a `VITE_API_BASE_URL` override.
+  `apiUrl()` now always returns a relative path, so every browser call is
+  same-origin and needs no CORS. A static test
+  (`cli/sameOriginApi.test.ts`) fails if browser code builds an absolute
+  `/api` URL.
+- `/api/validate` keeps its own CORS headers for third-party browser use of the
+  public REST API.
 
-## Remaining hypotheses (need Cloudflare-side inspection)
+## What the workaround had hidden
 
-1. **Custom-domain attachment / routing** — `safesqlpro.dev` may route the Function
-   through an extra hop (Cloudflare-for-SaaS custom hostname, or a proxied CNAME)
-   that can't complete a Worker subrequest. Re-adding the custom domain in Pages →
-   Custom domains may force a clean re-bind.
-2. **A short edge/origin timeout** on the zone that aborts the Function once it awaits
-   a subrequest (sub-second), while `pages.dev` uses the default.
-3. A zone-level setting not surfaced in WAF/Rules (e.g. an account/zone-specific
-   subrequest restriction).
+Because calls went cross-origin, the CORS headers of each Function mattered.
+The `/api/teams/*` helpers allowed `GET, POST, DELETE, OPTIONS` but not `PATCH`,
+so cross-origin role changes and custom-rule edits failed their preflight.
+Same-origin calls have no preflight, so removing the workaround fixes these too.
 
-## Recommended next step
+## Hypotheses from the first investigation (superseded)
 
-**Open a Cloudflare support ticket** with this exact symptom:
-
-> Pages project `safesql`. On the custom domain `safesqlpro.dev`, POST to a Pages
-> Function that makes an outbound `fetch()` returns a bare `error code: 502`
-> (Server: cloudflare, text/plain), while the same request on
-> `<project>.pages.dev` succeeds. POSTs that return without an outbound subrequest
-> work on the custom domain. OPTIONS/GET work. WAF, Transform/Config Rules, and
-> Worker Routes are all empty; there are no Workers on the account. Need to know why
-> the custom-domain path terminates a Function's subrequest.
-
-Until resolved, the `pages.dev` workaround keeps checkout/portal/webhook working.
+The first investigation eliminated WAF rules, Transform and Configuration rules,
+Workers routes, missing OPTIONS handlers, Node SDK use, stale bundles and
+missing environment variables. It then attributed the 502 to the custom domain
+terminating Functions that await a subrequest, and proposed re-binding the
+custom domain or a support ticket. Neither is needed: comparing the same request
+on both origins showed the 502 was our own status code, rewritten by the zone.

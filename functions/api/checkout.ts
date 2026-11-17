@@ -9,7 +9,7 @@ interface CheckoutBody {
 // onRequest catches every method so non-POST requests land on a clean
 // 405 instead of falling through to the SPA's static-asset catch-all.
 // The try/catch turns any unexpected Worker crash (which Cloudflare would
-// surface as a raw 502) into a readable 500 that shows up in Functions logs.
+// surface as a bare error page) into a readable 500 that shows up in Functions logs.
 export const onRequest: PagesFunction<Env> = async (context) => {
   if (context.request.method === 'OPTIONS') return preflight();
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
@@ -68,9 +68,10 @@ const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promis
   params.set('subscription_data[metadata][site]', 'safesqlpro.dev');
 
   const idempotencyKey = crypto.randomUUID();
-  // Bound the outbound call. A hung/failed subrequest to api.stripe.com is what
-  // surfaces as a bare Cloudflare 502 (the Worker is killed before it can return).
-  // Aborting turns that into a catchable, observable JSON error instead.
+  // Bound the outbound call so a hung api.stripe.com subrequest becomes a
+  // catchable JSON error. Upstream failures are 503, never 502/504: the
+  // custom-domain zone replaces an origin 502/504 with its own bare error page
+  // (docs/502-investigation.md), which would hide this JSON and its CORS headers.
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   let stripeRes: Response;
@@ -88,7 +89,7 @@ const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promis
     });
   } catch (err) {
     const aborted = (err as Error)?.name === 'AbortError';
-    return error(aborted ? 504 : 502, aborted ? 'Stripe API timeout' : 'Stripe API unreachable', {
+    return error(503, aborted ? 'Stripe API timeout' : 'Stripe API unreachable', {
       detail: aborted
         ? 'No response from api.stripe.com within 10s.'
         : ((err as Error)?.message ?? String(err)),
@@ -99,7 +100,7 @@ const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promis
 
   if (!stripeRes.ok) {
     const detail = await stripeRes.text();
-    return error(502, 'Stripe API error', { stripeStatus: stripeRes.status, detail });
+    return error(503, 'Stripe API error', { stripeStatus: stripeRes.status, detail });
   }
 
   const session = (await stripeRes.json()) as { id: string; url: string };

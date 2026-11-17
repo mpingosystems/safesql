@@ -34,7 +34,7 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]
       },
     },
   );
-  if (!lookup.ok) return error(502, 'Could not look up customer.');
+  if (!lookup.ok) return error(503, 'Could not look up customer.');
   const rows = (await lookup.json()) as { stripe_customer_id?: string }[];
   const customerId = rows?.[0]?.stripe_customer_id;
   if (!customerId) return error(404, 'No Stripe customer on file for this account.');
@@ -46,8 +46,10 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]
   if (env.STRIPE_PORTAL_ID) params.set('configuration', env.STRIPE_PORTAL_ID);
 
   const idempotencyKey = crypto.randomUUID();
-  // Bound the outbound call so a hung/failed api.stripe.com subrequest becomes a
-  // catchable JSON error rather than a bare Cloudflare 502 (Worker killed).
+  // Bound the outbound call so a hung api.stripe.com subrequest becomes a
+  // catchable JSON error. Upstream failures are 503, never 502/504: the
+  // custom-domain zone replaces an origin 502/504 with its own bare error page
+  // (docs/502-investigation.md).
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   let res: Response;
@@ -65,7 +67,7 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]
     });
   } catch (err) {
     const aborted = (err as Error)?.name === 'AbortError';
-    return error(aborted ? 504 : 502, aborted ? 'Stripe portal timeout' : 'Stripe portal unreachable', {
+    return error(503, aborted ? 'Stripe portal timeout' : 'Stripe portal unreachable', {
       detail: aborted
         ? 'No response from api.stripe.com within 10s.'
         : ((err as Error)?.message ?? String(err)),
@@ -75,7 +77,7 @@ const onRequestPost = async ({ request, env }: Parameters<PagesFunction<Env>>[0]
   }
   if (!res.ok) {
     const detail = await res.text();
-    return error(502, 'Stripe portal error', { stripeStatus: res.status, detail });
+    return error(503, 'Stripe portal error', { stripeStatus: res.status, detail });
   }
   const session = (await res.json()) as { url: string };
   return json({ url: session.url });

@@ -19,8 +19,8 @@ import {
 // Limits: auth + plan + a 64 KB body cap. No per-user rate limit in this
 // hotfix; spend is capped by the key's Anthropic workspace limit.
 // CORS: app origin only (corsHeaders). This isn't a public API like
-// /api/validate. The production client reaches it through VITE_API_BASE_URL,
-// so it handles the OPTIONS preflight from the app origin.
+// /api/validate. The web app calls it same-origin; the OPTIONS handler stays
+// so a preflight from the app origin still succeeds.
 
 export const EXPLAIN_UNAVAILABLE = 'AI explanations are temporarily unavailable';
 const ENTITLED_PLANS = new Set(['pro', 'team', 'business', 'enterprise']);

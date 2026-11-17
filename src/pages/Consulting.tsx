@@ -295,7 +295,7 @@ export function ConsultingPage() {
       </section>
 
       <footer style={{ padding: '20px 32px', borderTop: `1px solid ${RULE}`, fontSize: 13, color: DIM }}>
-        Mpingo Systems LLC · Charlotte, NC · SafeSQL Pro v0.11.1 · 35 detectors ·{' '}
+        Mpingo Systems LLC · Charlotte, NC · SafeSQL Pro v0.11.2 · 35 detectors ·{' '}
         <a href="#/compliance" style={{ color: MUTED }}>Compliance</a> ·{' '}
         <a href="#/security" style={{ color: MUTED }}>Security</a>
       </footer>

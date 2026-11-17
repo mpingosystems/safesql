@@ -1,6 +1,5 @@
 // Sprint 9 (compliance tier) — browser client for the evidence bundle API.
-// Uses apiUrl() (the pages.dev routing) because bundle generation makes
-// outbound subrequests, which the custom-domain edge 502s on POST. Never throws.
+// Same-origin through apiUrl(). Never throws.
 
 import { apiUrl } from '../config/api';
 import { getClerkToken } from './supabaseClient';

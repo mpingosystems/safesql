@@ -1,19 +1,14 @@
-// Base origin for first-party /api/* calls.
+// Path for first-party /api/* calls from the browser.
 //
-// Defaults to the current origin (same-origin, relative behaviour). Set
-// VITE_API_BASE_URL to route calls through a different origin — currently the
-// canonical https://safesql.pages.dev deployment, where POST /api/* works while
-// the safesqlpro.dev custom-domain edge returns a bare 502 on POST (an edge-rule
-// issue; see docs/502-investigation.md).
+// Always same-origin and relative: the app calls the origin that served it, so
+// no browser request needs CORS. There is no base-URL override. An earlier
+// cross-origin workaround (VITE_API_BASE_URL → *.pages.dev) existed because
+// the custom domain showed a bare 502; that came from the zone replacing an
+// origin 502/504 response with its own page, not from the request itself
+// (docs/502-investigation.md). Functions now never return 502/504.
 //
-// Cross-origin use requires the target Function to send CORS headers + handle
-// OPTIONS. Only route endpoints that do (checkout, portal, digest, validate,
-// schema/sync, badge) — NOT schema/connections or webhook/notify, which lack them.
-export const API_BASE: string =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  (typeof window !== 'undefined' ? window.location.origin : '');
-
+// cli/sameOriginApi.test.ts enforces this: apiUrl() returns a relative
+// path, and no browser code builds an absolute /api URL.
 export function apiUrl(path: string): string {
-  const p = path.startsWith('/') ? path : `/${path}`;
-  return `${API_BASE}${p}`;
+  return path.startsWith('/') ? path : `/${path}`;
 }

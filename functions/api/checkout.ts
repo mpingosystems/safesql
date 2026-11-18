@@ -10,7 +10,9 @@ interface CheckoutBody {
 // 405 instead of falling through to the SPA's static-asset catch-all.
 // The try/catch turns any unexpected Worker crash (which Cloudflare would
 // surface as a bare error page) into a readable 500 that shows up in Functions logs.
-export const onRequest: PagesFunction<Env> = async (context) => {
+// Context is typed structurally (not PagesFunction) so unit tests under src/
+// can import this module; tsconfig.app.json has no Workers types.
+export const onRequest = async (context: { request: Request; env: Env }): Promise<Response> => {
   if (context.request.method === 'OPTIONS') return preflight();
   if (context.request.method !== 'POST') return methodNotAllowed(['POST']);
   try {
@@ -24,7 +26,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
   }
 };
 
-const onRequestPost = async (context: Parameters<PagesFunction<Env>>[0]): Promise<Response> => {
+const onRequestPost = async (context: { request: Request; env: Env }): Promise<Response> => {
   const { request, env } = context;
 
   if (!env.STRIPE_SECRET_KEY) {

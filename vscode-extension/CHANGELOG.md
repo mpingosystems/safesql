@@ -1,5 +1,14 @@
 # Change Log
 
+## 0.1.1 — November 2026
+
+Maintenance release. No change to settings or behaviour.
+
+- Built on the published [`@safesqlpro/sdk`](https://www.npmjs.com/package/@safesqlpro/sdk) 0.2.0.
+- Published from CI to the VS Code Marketplace and, for the first time, to
+  [Open VSX](https://open-vsx.org) (for VSCodium, Cursor and other
+  Open VSX-based editors).
+
 ## 0.1.0 — August 2026
 
 Initial release.

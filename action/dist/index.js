@@ -68677,9 +68677,12 @@ function reachable(start, childMap) {
 function validateSqlSource(sql, schemaSql, dialect = 'postgresql', 
 // Sprint 5C — omit for the full detector set. The REST API passes the caller's
 // plan; the CLI and GitHub Action run the local engine and pass nothing.
-tier) {
+tier, 
+// Sprint 9 (compliance) — the caller's team custom rules. The REST API loads
+// them for Business+ teams; everything else passes nothing (unchanged).
+customRules) {
     const schema = schemaSql && schemaSql.trim() ? parseDDL(schemaSql, dialect) : undefined;
-    return validateSQL({ sql, schema, dialect, tier });
+    return validateSQL({ sql, schema, dialect, tier, ...(customRules && customRules.length > 0 ? { customRules } : {}) });
 }
 function prepareDbtContext(artifacts) {
     return parseDbtArtifacts(artifacts);
@@ -68698,11 +68701,11 @@ function modelNameFromFilename(filename, context) {
     const rel = context.models.get(stem.toLowerCase());
     return rel ? rel.relation : undefined;
 }
-function validateSqlWithDbt(sql, dbt, schemaSql, dialect = 'postgresql', tier, currentModel) {
+function validateSqlWithDbt(sql, dbt, schemaSql, dialect = 'postgresql', tier, currentModel, customRules) {
     const userSchema = schemaSql && schemaSql.trim() ? parseDDL(schemaSql, dialect) : undefined;
     const schema = mergeSchemas(userSchema, dbt.schema);
     const context = currentModel ? { ...dbt.context, currentModel } : dbt.context;
-    return validateSQL({ sql, schema, dialect, tier, dbtContext: context });
+    return validateSQL({ sql, schema, dialect, tier, dbtContext: context, ...(customRules && customRules.length > 0 ? { customRules } : {}) });
 }
 function summarizeDbtContext(ctx) {
     const uniqueModels = new Set([...ctx.models.values()].map((m) => m.uniqueId));

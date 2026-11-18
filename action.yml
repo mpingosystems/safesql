@@ -42,9 +42,6 @@ inputs:
     description: "Fail if warnings found (default: only fail on errors)"
     required: false
     default: "false"
-  api_key:
-    description: "SafeSQL API key (Pro/Team tier for AI explanations)"
-    required: false
 outputs:
   issues_found:
     description: "Number of issues found across all files"

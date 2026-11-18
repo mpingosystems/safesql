@@ -1,0 +1,149 @@
+name: Publish VS Code extension
+
+# Publishes vscode-extension/ to the VS Code Marketplace and Open VSX.
+#
+# Trigger: push a tag `vscode-v<version>` whose version equals
+# vscode-extension/package.json. workflow_dispatch only builds and packages
+# (a dry run); it never publishes.
+#
+# Marketplace: keyless Trusted Publishing. `vsce publish --oidc` exchanges this
+# job's GitHub OIDC token (id-token: write) for a short-lived Marketplace
+# credential. No PAT is stored anywhere. The Marketplace publisher's Trusted
+# Publishing policy must name: owner mpingosystems, repo safesql, workflow
+# publish-extension.yml, environment marketplace.
+#
+# Open VSX has no OIDC, so it uses one token: the OVSX_PAT secret, stored on the
+# `marketplace` environment so it is only exposed after approval.
+#
+# Both publish jobs run in the `marketplace` environment, which requires the
+# owner's approval. They are separate jobs so a failure on one registry can be
+# re-run without republishing to the other. Both publish the same .vsix.
+on:
+  push:
+    tags: ['vscode-v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-extension-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      vsix: ${{ steps.pack.outputs.vsix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            vscode-extension/package-lock.json
+
+      - name: Tag matches package.json version
+        if: startsWith(github.ref, 'refs/tags/vscode-v')
+        run: |
+          want="${GITHUB_REF_NAME#vscode-v}"
+          have="$(node -p "require('./vscode-extension/package.json').version")"
+          echo "tag ${want}, package.json ${have}"
+          test "$want" = "$have"
+
+      - name: Install (root, for the extension's unit tests)
+        run: npm ci
+
+      - name: Extension unit tests
+        run: npx vitest run vscode-extension/
+
+      - name: Install (extension)
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Package
+        id: pack
+        working-directory: vscode-extension
+        run: |
+          npx vsce package
+          vsix="$(ls -1 *.vsix)"
+          test "$(echo "$vsix" | wc -l)" -eq 1
+          echo "vsix=$vsix" >> "$GITHUB_OUTPUT"
+
+      - name: Secret scan of the bundled extension
+        run: node scripts/check-bundle-secrets.mjs vscode-extension/dist
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vsix
+          path: vscode-extension/${{ steps.pack.outputs.vsix }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-marketplace:
+    if: startsWith(github.ref, 'refs/tags/vscode-v')
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: marketplace
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install (extension; pins vsce)
+        working-directory: vscode-extension
+        run: npm ci
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vsix
+          path: vsix
+
+      - name: Publish to the VS Code Marketplace (Trusted Publishing, no PAT)
+        working-directory: vscode-extension
+        run: npx vsce publish --oidc --packagePath "../vsix/${{ needs.package.outputs.vsix }}"
+
+  publish-openvsx:
+    if: startsWith(github.ref, 'refs/tags/vscode-v')
+    needs: package
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: marketplace
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install (extension; pins ovsx)
+        working-directory: vscode-extension
+        run: npm ci
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: vsix
+          path: vsix
+
+      - name: Publish to Open VSX
+        working-directory: vscode-extension
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          test -n "$OVSX_PAT" || { echo "OVSX_PAT is not set on the marketplace environment"; exit 1; }
+          # ovsx reads the token from OVSX_PAT; it is never put on the command line.
+          npx ovsx publish "../vsix/${{ needs.package.outputs.vsix }}"

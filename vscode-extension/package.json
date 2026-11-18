@@ -1,8 +1,8 @@
 {
   "name": "safesql-pro",
   "displayName": "SafeSQL Pro",
-  "description": "Semantic SQL validation \u2014 catches logic errors linters miss",
-  "version": "0.1.0",
+  "description": "Semantic SQL validation — catches logic errors linters miss",
+  "version": "0.1.1",
   "publisher": "mpingosystems",
   "license": "Apache-2.0",
   "icon": "icon.png",
@@ -42,11 +42,12 @@
     "package": "npm run compile && vsce package"
   },
   "devDependencies": {
-    "@safesqlpro/sdk": "file:../sdk",
+    "@safesqlpro/sdk": "^0.2.0",
     "@types/node": "^24.12.2",
     "@types/vscode": "^1.85.0",
-    "@vscode/vsce": "^3.0.0",
+    "@vscode/vsce": "^4.1.1",
     "esbuild": "^0.25.0",
+    "ovsx": "^1.4.0",
     "typescript": "~6.0.2"
   },
   "contributes": {

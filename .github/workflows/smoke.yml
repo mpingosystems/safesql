@@ -1,0 +1,39 @@
+name: Smoke (live)
+
+# Daily read-only smoke check of the deployed site (scripts/smoke.mjs). It needs
+# no secrets and prints status codes and counts only. The checkout probe sends a
+# malformed priceId, which the Function rejects before calling Stripe, so this
+# job never touches the live Stripe account.
+on:
+  schedule:
+    - cron: '17 6 * * *' # daily, 06:17 UTC
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Site to check'
+        required: false
+        default: 'https://safesqlpro.dev'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # The script uses only Node built-ins and fetch, so no npm install.
+      - name: Smoke check
+        run: node scripts/smoke.mjs
+        env:
+          SMOKE_BASE_URL: ${{ inputs.base_url || 'https://safesqlpro.dev' }}

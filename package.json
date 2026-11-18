@@ -1,7 +1,7 @@
 {
   "name": "safesql",
   "private": true,
-  "version": "0.11.2",
+  "version": "0.11.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "check:bundle-secrets": "node scripts/check-bundle-secrets.mjs dist",
     "check:leaks": "node scripts/check-leaks.mjs",
     "state": "node scripts/state.mjs --print",
+    "smoke": "node scripts/smoke.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",

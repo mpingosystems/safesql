@@ -17,11 +17,18 @@ editor — runs entirely in CI, no network call required.
 
 | Input | Default | Description |
 |-------|---------|-------------|
+| `mode`              | `validate`   | `validate` (glob files) \| `pr-review` (inline comments on changed SQL in a PR) |
+| `github_token`      | —            | `pr-review` only: the workflow's `GITHUB_TOKEN` (needs `pull-requests: write`) |
+| `comment_mode`      | `block`      | `pr-review` only: `block` (fail the check) \| `warn` (comment without blocking) |
 | `sql_files`         | `**/*.sql`   | Glob of SQL files to validate |
 | `schema_file`       | —            | DDL schema file (enables column-level detectors) |
+| `dbt_target`        | —            | dbt `target/` directory with `manifest.json` (`catalog.json`, `run_results.json` used when present) |
 | `dialect`           | `postgresql` | `postgresql` \| `mysql` \| `bigquery` \| `snowflake` |
 | `fail_on_warnings`  | `false`      | Fail the job on warnings too (default: only errors) |
-| `api_key`           | —            | SafeSQL API key (Pro/Team — AI explanations) |
+
+The action takes no API key: all 35 detectors run locally on the runner, and
+your SQL never leaves it. (v0.11.3 removed an `api_key` input that was declared
+but never read; delete it from your `with:` block.)
 
 ## Outputs
 
